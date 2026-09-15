@@ -33,7 +33,7 @@ public class NPCListener implements Listener {
             gui.openMainGui(player, npc);
         } else {
             if (npc.getFeatures().isEmpty()) {
-                player.sendMessage(PhilosNPCPlugin.cc("&7这个NPC还没有启用任何功能"));
+                player.sendMessage(PhilosNPCPlugin.cc("&7此NPC未启用任何功能"));
                 return;
             }
             gui.openCustomerGui(player, npc);

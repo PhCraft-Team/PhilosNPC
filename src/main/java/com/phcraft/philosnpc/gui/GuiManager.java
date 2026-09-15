@@ -110,7 +110,7 @@ public class GuiManager implements Listener {
         if (page < 0) page = 0;
 
         Inventory inv = Bukkit.createInventory(null, 54,
-                PhilosNPCPlugin.cc("&b&l我的NPC列表 - 第" + (page + 1) + "/" + totalPages + "页"));
+                PhilosNPCPlugin.cc("&b&l我的NPC - 第" + (page + 1) + "/" + totalPages + "页"));
 
         int start = page * perPage;
         int end = Math.min(start + perPage, npcs.size());
@@ -149,7 +149,7 @@ public class GuiManager implements Listener {
         }
         inv.setItem(49, createButton(Material.BARRIER, "&c关闭", "&7点击关闭"));
         if (page < totalPages - 1) {
-            inv.setItem(53, createButton(Material.ARROW, "&a下一页", "&7点击下一页"));
+            inv.setItem(53, createButton(Material.ARROW, "&a下一页", "&7下一页"));
         }
 
         fillEmpty(inv);
@@ -370,7 +370,7 @@ public class GuiManager implements Listener {
                     npcManager.saveAll();
                     player.sendMessage(PhilosNPCPlugin.cc("&a已添加功能: " + feature.displayName()));
                 } else {
-                    player.sendMessage(PhilosNPCPlugin.cc("&c功能数量已达上限"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&c功能已达上限"));
                 }
             }
             openMainGui(player, npc);
@@ -396,7 +396,7 @@ public class GuiManager implements Listener {
             // 重新生成NPC以应用新姿势
             npcManager.despawnNPC(npc);
             npcManager.spawnNPC(npc);
-            player.sendMessage(PhilosNPCPlugin.cc("&a姿势已设置为: " + poses[poseIndex].displayName()));
+            player.sendMessage(PhilosNPCPlugin.cc("&a姿势已设为: " + poses[poseIndex].displayName()));
             openPoseSelectGui(player, npc);
         }
     }
@@ -503,8 +503,8 @@ public class GuiManager implements Listener {
             case 28: // 物物交换模式（系统NPC）或价格物品2提示（个人NPC）
                 if (npc.isSystem()) {
                     state.getData().put("useCurrency", false);
-                    player.sendMessage(PhilosNPCPlugin.cc("&a已切换为物物交换模式"));
-                    player.sendMessage(PhilosNPCPlugin.cc("&7请将价格物品和产出物品放入对应槽位"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&a物物交换模式"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&7价格物品和产出物品放入对应槽位"));
                 }
                 break;
             case 30: // 添加交易
@@ -531,7 +531,7 @@ public class GuiManager implements Listener {
         var slot29Item = inv.getItem(29);
 
         if (slot29Item == null || slot29Item.getType() == Material.AIR) {
-            player.sendMessage(PhilosNPCPlugin.cc("&c请先将产出物品放入槽位29"));
+            player.sendMessage(PhilosNPCPlugin.cc("&c产出物品放入槽位29"));
             return;
         }
 
@@ -582,15 +582,15 @@ public class GuiManager implements Listener {
                 break;
             case 21: // 奖励命令设置
                 player.closeInventory();
-                player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入奖励命令（输入 &ccancel &a取消）："));
-                player.sendMessage(PhilosNPCPlugin.cc("&7可用占位符: &b{player}"));
+                player.sendMessage(PhilosNPCPlugin.cc("&a聊天框输入命令，输入cancel取消"));
+                player.sendMessage(PhilosNPCPlugin.cc("&7占位符: &b{player}"));
                 pendingRewardCmd.put(player.getUniqueId(), npc.getId());
                 break;
             case 22: // 传送价格（系统NPC可自定义）
                 if (npc.isSystem()) {
                     player.closeInventory();
-                    player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入传送价格（输入 &ccancel &a取消）："));
-                    player.sendMessage(PhilosNPCPlugin.cc("&7输入 0 表示免费，输入 -1 恢复默认(5金币)"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&a聊天框输入传送价格，输入cancel取消"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&70=免费，-1=恢复默认(5金币)"));
                     pendingTeleportCost.put(player.getUniqueId(), npc.getId());
                 }
                 break;
@@ -648,7 +648,7 @@ public class GuiManager implements Listener {
             case 15: // 清除留言
                 com.phcraft.philosnpc.features.MessageFeature.setMessage(npc, "");
                 npcManager.saveAll();
-                player.sendMessage(PhilosNPCPlugin.cc("&a留言已清除"));
+                player.sendMessage(PhilosNPCPlugin.cc("&a已清除"));
                 openMessageEditGui(player, npc);
                 break;
             case 18: // 返回
@@ -657,7 +657,7 @@ public class GuiManager implements Listener {
             case 22: // 移除功能
                 npc.removeFeature(com.phcraft.philosnpc.npc.FeatureType.MESSAGE);
                 npcManager.saveAll();
-                player.sendMessage(PhilosNPCPlugin.cc("&c已移除留言功能"));
+                player.sendMessage(PhilosNPCPlugin.cc("&c留言功能已移除"));
                 openMainGui(player, npc);
                 break;
         }
@@ -779,14 +779,14 @@ public class GuiManager implements Listener {
             try {
                 double price = Double.parseDouble(msg);
                 if (price <= 0) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&c价格必须大于0"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&c价格需大于0"));
                     return;
                 }
                 // 读取存储的产出物品
                 var state = openGuis.get(player);
                 ItemStack result = (state != null) ? (ItemStack) state.getData().get("pendingResult") : null;
                 if (result == null) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&c产出物品丢失，请重新操作"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&c产出物品丢失，重新操作"));
                     return;
                 }
                 var trade = new com.phcraft.philosnpc.features.ShopTrade(result, price, -1);
@@ -850,12 +850,12 @@ public class GuiManager implements Listener {
             if (npc == null) return;
 
             if (msg.equalsIgnoreCase("cancel")) {
-                player.sendMessage(PhilosNPCPlugin.cc("&c已取消设置"));
+                player.sendMessage(PhilosNPCPlugin.cc("&c已取消"));
                 return;
             }
             com.phcraft.philosnpc.features.MessageFeature.setMessage(npc, msg);
             npcManager.saveAll();
-            player.sendMessage(PhilosNPCPlugin.cc("&a留言已设置"));
+            player.sendMessage(PhilosNPCPlugin.cc("&a留言已保存"));
         }
     }
 

@@ -57,7 +57,7 @@ public class TeleportFeature {
         // 执行传送
         player.teleport(target);
         player.sendMessage(PhilosNPCPlugin.cc(
-                "&a已传送到目标地点，花费 " + cost + " 金币"));
+                "&a已传送，花费" + cost + "金币"));
 
         // 执行奖励命令
         String rewardCmd = npc.getTeleportRewardCmd();
