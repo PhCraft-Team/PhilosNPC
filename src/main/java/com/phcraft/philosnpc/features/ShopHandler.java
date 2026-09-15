@@ -260,14 +260,14 @@ public class ShopHandler {
 
         public String getMessage() {
             return switch (this) {
-                case SUCCESS -> PhilosNPCPlugin.cc("&a交易成功！");
-                case OUT_OF_STOCK -> PhilosNPCPlugin.cc("&c该商品已售罄！");
-                case NOT_ENOUGH_PRICE1 -> PhilosNPCPlugin.cc("&c你没有足够的价格物品1！");
-                case NOT_ENOUGH_PRICE2 -> PhilosNPCPlugin.cc("&c你没有足够的价格物品2！");
-                case NOT_ENOUGH_MONEY -> PhilosNPCPlugin.cc("&c金币不足！");
-                case SHOP_OUT_OF_STOCK -> PhilosNPCPlugin.cc("&c商店库存不足，请联系店主补货！");
-                case INVENTORY_FULL -> PhilosNPCPlugin.cc("&c你的背包已满，请先腾出空间！");
-                default -> PhilosNPCPlugin.cc("&c交易失败，请稍后重试！");
+                case SUCCESS -> PhilosNPCPlugin.cc("&a交易完成");
+                case OUT_OF_STOCK -> PhilosNPCPlugin.cc("&c已售罄");
+                case NOT_ENOUGH_PRICE1 -> PhilosNPCPlugin.cc("&c价格物品1不足");
+                case NOT_ENOUGH_PRICE2 -> PhilosNPCPlugin.cc("&c价格物品2不足");
+                case NOT_ENOUGH_MONEY -> PhilosNPCPlugin.cc("&c金币不足");
+                case SHOP_OUT_OF_STOCK -> PhilosNPCPlugin.cc("&c商店库存不足");
+                case INVENTORY_FULL -> PhilosNPCPlugin.cc("&c背包已满");
+                default -> PhilosNPCPlugin.cc("&c交易失败");
             };
         }
     }
