@@ -4,7 +4,9 @@ import com.phcraft.philosnpc.PhilosNPCPlugin;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
+import org.bukkit.Color;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -17,6 +19,8 @@ import org.bukkit.entity.ArmorStand;
 import org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.LeatherArmorMeta;
+import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
@@ -31,6 +35,9 @@ public class NPCManager {
     private final Map<Integer, String> entityIdMap;
     private final Map<UUID, ItemStack[]> sharedShopInventories;
     private final File dataFile;
+
+    // 默认皮革装备颜色（史蒂夫配色：蓝青色系）
+    private static final Color DEFAULT_LEATHER_COLOR = Color.fromRGB(70, 130, 180); // 钢蓝色
 
     public NPCManager() {
         this.plugin = PhilosNPCPlugin.instance();
@@ -119,6 +126,44 @@ public class NPCManager {
         PhilosNPC npc = new PhilosNPC(player.getName(), player.getUniqueId(), player.getLocation());
         npcs.put(npc.getId(), npc);
 
+        // 设置默认装备：玩家皮肤头颅 + 皮革装备 + 主手物品
+        ItemStack[] npcEquip = npc.getEquipment();
+
+        // 头盔：玩家皮肤头颅（必设，保证显示玩家头）
+        npcEquip[0] = createPlayerHead(player.getName());
+
+        // 胸甲/护腿/靴子：默认皮革装备（史蒂夫蓝配色），如果玩家有穿则用玩家的
+        ItemStack[] playerEquip = player.getEquipment().getArmorContents();
+        // playerEquip顺序: 0=靴子, 1=护腿, 2=胸甲, 3=头盔
+        // npcEquip顺序: 0=头盔, 1=胸甲, 2=护腿, 3=靴子, 4=主手
+
+        // 胸甲
+        if (playerEquip[2] != null && playerEquip[2].getType() != Material.AIR) {
+            npcEquip[1] = playerEquip[2].clone();
+        } else {
+            npcEquip[1] = createLeatherArmor(Material.LEATHER_CHESTPLATE, DEFAULT_LEATHER_COLOR);
+        }
+        // 护腿
+        if (playerEquip[1] != null && playerEquip[1].getType() != Material.AIR) {
+            npcEquip[2] = playerEquip[1].clone();
+        } else {
+            npcEquip[2] = createLeatherArmor(Material.LEATHER_LEGGINGS, DEFAULT_LEATHER_COLOR);
+        }
+        // 靴子
+        if (playerEquip[0] != null && playerEquip[0].getType() != Material.AIR) {
+            npcEquip[3] = playerEquip[0].clone();
+        } else {
+            npcEquip[3] = createLeatherArmor(Material.LEATHER_BOOTS, DEFAULT_LEATHER_COLOR);
+        }
+        // 主手
+        if (player.getEquipment().getItemInMainHand() != null
+                && player.getEquipment().getItemInMainHand().getType() != Material.AIR) {
+            npcEquip[4] = player.getEquipment().getItemInMainHand().clone();
+        } else {
+            // 默认手持物品
+            npcEquip[4] = new ItemStack(Material.STICK);
+        }
+
         // 同步共享商店背包到新NPC
         ItemStack[] sharedInv = getSharedShopInventory(player.getUniqueId());
         npc.setShopInventory(sharedInv);
@@ -188,6 +233,16 @@ public class NPCManager {
         return result;
     }
 
+    public List<PhilosNPC> getSystemNPCs() {
+        List<PhilosNPC> result = new ArrayList<>();
+        for (PhilosNPC npc : npcs.values()) {
+            if (npc.isSystem()) {
+                result.add(npc);
+            }
+        }
+        return result;
+    }
+
     public Collection<PhilosNPC> getAllNPCs() {
         return npcs.values();
     }
@@ -242,6 +297,10 @@ public class NPCManager {
         entity.setSilent(true);
         entity.setPersistent(true);
 
+        // 显示手臂，去掉底座
+        entity.setArms(true);
+        entity.setBasePlate(false);
+
         try {
             var method = entity.getClass().getMethod("setScale", float.class);
             method.invoke(entity, (float) npc.getScale());
@@ -249,14 +308,57 @@ public class NPCManager {
             if (npc.getScale() < 0.75) entity.setSmall(true);
         }
 
+        // 装备设置：确保头盔是玩家头颅
         EntityEquipment eq = entity.getEquipment();
         if (eq != null) {
             ItemStack[] equipment = npc.getEquipment();
-            if (equipment[0] != null) eq.setHelmet(equipment[0], true);
-            if (equipment[1] != null) eq.setChestplate(equipment[1], true);
-            if (equipment[2] != null) eq.setLeggings(equipment[2], true);
-            if (equipment[3] != null) eq.setBoots(equipment[3], true);
-            if (equipment[4] != null) eq.setItemInMainHand(equipment[4], true);
+
+            // 头盔：确保是玩家头颅
+            if (equipment[0] != null && equipment[0].getType() == Material.PLAYER_HEAD) {
+                eq.setHelmet(equipment[0], true);
+            } else {
+                // 如果头盔不是玩家头颅或为空，创建一个玩家头颅
+                ItemStack head = createPlayerHead(npc.getOwnerName());
+                eq.setHelmet(head, true);
+                // 同步回数据模型
+                equipment[0] = head;
+            }
+
+            // 胸甲：如果没有则给默认皮革装备
+            if (equipment[1] != null) {
+                eq.setChestplate(equipment[1], true);
+            } else {
+                ItemStack chest = createLeatherArmor(Material.LEATHER_CHESTPLATE, DEFAULT_LEATHER_COLOR);
+                eq.setChestplate(chest, true);
+                equipment[1] = chest;
+            }
+
+            // 护腿
+            if (equipment[2] != null) {
+                eq.setLeggings(equipment[2], true);
+            } else {
+                ItemStack legs = createLeatherArmor(Material.LEATHER_LEGGINGS, DEFAULT_LEATHER_COLOR);
+                eq.setLeggings(legs, true);
+                equipment[2] = legs;
+            }
+
+            // 靴子
+            if (equipment[3] != null) {
+                eq.setBoots(equipment[3], true);
+            } else {
+                ItemStack boots = createLeatherArmor(Material.LEATHER_BOOTS, DEFAULT_LEATHER_COLOR);
+                eq.setBoots(boots, true);
+                equipment[3] = boots;
+            }
+
+            // 主手
+            if (equipment[4] != null) {
+                eq.setItemInMainHand(equipment[4], true);
+            } else {
+                ItemStack hand = new ItemStack(Material.STICK);
+                eq.setItemInMainHand(hand, true);
+                equipment[4] = hand;
+            }
         }
 
         applyPose(entity, npc.getPose());
@@ -270,7 +372,7 @@ public class NPCManager {
         String typeName = npc.getEntityTypeName();
 
         if (typeName.startsWith("PLAYER:")) {
-            // 玩家型系统NPC：用ArmorStand + 指定玩家头颅
+            // 玩家型系统NPC：用ArmorStand + 指定玩家头颅 + 皮革身体
             String playerName = typeName.substring(7);
             ArmorStand entity = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
 
@@ -281,6 +383,10 @@ public class NPCManager {
             entity.setSilent(true);
             entity.setPersistent(true);
 
+            // 显示手臂，去掉底座
+            entity.setArms(true);
+            entity.setBasePlate(false);
+
             try {
                 var method = entity.getClass().getMethod("setScale", float.class);
                 method.invoke(entity, (float) npc.getScale());
@@ -288,22 +394,42 @@ public class NPCManager {
                 if (npc.getScale() < 0.75) entity.setSmall(true);
             }
 
-            // 设置玩家头颅
-            var skull = new org.bukkit.inventory.ItemStack(org.bukkit.Material.PLAYER_HEAD);
-            var skullMeta = (org.bukkit.inventory.meta.SkullMeta) skull.getItemMeta();
-            if (skullMeta != null) {
-                skullMeta.setOwner(playerName);
-                skull.setItemMeta(skullMeta);
-            }
             EntityEquipment eq = entity.getEquipment();
             if (eq != null) {
-                eq.setHelmet(skull, true);
                 ItemStack[] equipment = npc.getEquipment();
+                boolean hasChest = false, hasLeggings = false, hasBoots = false;
+
+                // 头盔：玩家头颅
+                if (equipment != null && equipment[0] != null && equipment[0].getType() == Material.PLAYER_HEAD) {
+                    eq.setHelmet(equipment[0], true);
+                } else {
+                    ItemStack skull = createPlayerHead(playerName);
+                    eq.setHelmet(skull, true);
+                    if (equipment != null) equipment[0] = skull;
+                }
+
                 if (equipment != null) {
-                    if (equipment[1] != null) eq.setChestplate(equipment[1], true);
-                    if (equipment[2] != null) eq.setLeggings(equipment[2], true);
-                    if (equipment[3] != null) eq.setBoots(equipment[3], true);
+                    if (equipment[1] != null) { eq.setChestplate(equipment[1], true); hasChest = true; }
+                    if (equipment[2] != null) { eq.setLeggings(equipment[2], true); hasLeggings = true; }
+                    if (equipment[3] != null) { eq.setBoots(equipment[3], true); hasBoots = true; }
                     if (equipment[4] != null) eq.setItemInMainHand(equipment[4], true);
+                }
+
+                // 默认皮革套装作为身体基础显示（深紫色系，系统NPC风格）
+                Color sysColor = Color.fromRGB(128, 0, 128); // 紫色
+                if (!hasChest) {
+                    eq.setChestplate(createLeatherArmor(Material.LEATHER_CHESTPLATE, sysColor), true);
+                }
+                if (!hasLeggings) {
+                    eq.setLeggings(createLeatherArmor(Material.LEATHER_LEGGINGS, sysColor), true);
+                }
+                if (!hasBoots) {
+                    eq.setBoots(createLeatherArmor(Material.LEATHER_BOOTS, sysColor), true);
+                }
+
+                // 主手默认物品
+                if (equipment == null || equipment[4] == null) {
+                    eq.setItemInMainHand(new ItemStack(Material.STICK), true);
                 }
             }
 
@@ -358,6 +484,13 @@ public class NPCManager {
         }
     }
 
+    // ===== 重新生成NPC以应用装备/外观变更 =====
+
+    public void respawnNPC(PhilosNPC npc) {
+        despawnNPC(npc);
+        spawnNPC(npc);
+    }
+
     public void despawnNPC(PhilosNPC npc) {
         // 找到对应的实体并移除
         Iterator<Map.Entry<Integer, String>> iterator = entityIdMap.entrySet().iterator();
@@ -365,7 +498,6 @@ public class NPCManager {
             Map.Entry<Integer, String> entry = iterator.next();
             if (entry.getValue().equals(npc.getId())) {
                 int entityId = entry.getKey();
-                Entity entity = Bukkit.getEntity(java.util.UUID.randomUUID()); // 不能直接通过id查
                 // 遍历所有已加载的实体来查找
                 for (World world : Bukkit.getWorlds()) {
                     for (Entity e : world.getEntities()) {
@@ -456,12 +588,12 @@ public class NPCManager {
         switch (pose) {
             case STANDING:
                 entity.setArms(true);
-                entity.setBasePlate(true);
+                entity.setBasePlate(false);
                 entity.setSmall(false);
                 break;
             case SNEAKING:
                 entity.setArms(true);
-                entity.setBasePlate(true);
+                entity.setBasePlate(false);
                 entity.setSmall(false);
                 // 略微降低高度模拟潜行
                 break;
@@ -477,8 +609,34 @@ public class NPCManager {
                 break;
             case DANCING:
                 entity.setArms(true);
-                entity.setBasePlate(true);
+                entity.setBasePlate(false);
                 break;
         }
+    }
+
+    /**
+     * 创建玩家头颅物品
+     */
+    private ItemStack createPlayerHead(String playerName) {
+        ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+        SkullMeta meta = (SkullMeta) head.getItemMeta();
+        if (meta != null) {
+            meta.setOwner(playerName);
+            head.setItemMeta(meta);
+        }
+        return head;
+    }
+
+    /**
+     * 创建染色皮革装备
+     */
+    private ItemStack createLeatherArmor(Material material, Color color) {
+        ItemStack item = new ItemStack(material);
+        LeatherArmorMeta meta = (LeatherArmorMeta) item.getItemMeta();
+        if (meta != null) {
+            meta.setColor(color);
+            item.setItemMeta(meta);
+        }
+        return item;
     }
 }
