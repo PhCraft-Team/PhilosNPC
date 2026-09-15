@@ -1,0 +1,13 @@
+# PhilosNPC 配置文件
+
+# 创建NPC费用
+create-cost: 500.0
+
+# 传送到NPC的费用
+tp-to-npc-cost: 10.0
+
+# 传送功能默认费用（个人NPC固定价格）
+teleport-feature-cost: 5.0
+
+# 每个NPC最多可启用的功能数
+max-features: 4
