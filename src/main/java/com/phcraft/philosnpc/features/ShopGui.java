@@ -54,14 +54,15 @@ public class ShopGui {
     // ===== 交易配方编辑界面（54格） =====
 
     public static Inventory tradeEditGui(PhilosNPC npc, int page) {
-        Inventory inv = Bukkit.createInventory(null, 54, PhilosNPCPlugin.cc("&b&l交易配方编辑 - 第" + (page + 1) + "页"));
+        String title = npc.isSystem()
+                ? "&d&l系统NPC交易编辑 - 第" + (page + 1) + "页"
+                : "&b&l交易配方编辑 - 第" + (page + 1) + "页";
+        Inventory inv = Bukkit.createInventory(null, 54, PhilosNPCPlugin.cc(title));
 
         List<ShopTrade> trades = npc.getTrades();
         int tradesPerPage = 9;
         int startIndex = page * tradesPerPage;
 
-        // 前3行（slot 0-26）：已有的交易配方展示
-        // 简化版：每格显示一个配方的产出物品，Lore显示价格，点击删除
         for (int i = 0; i < tradesPerPage; i++) {
             int tradeIndex = startIndex + i;
             if (tradeIndex < trades.size()) {
@@ -71,30 +72,43 @@ public class ShopGui {
         }
 
         // 第4行："添加新交易" 区域
-        // slot 27: 价格1槽位提示
-        inv.setItem(27, createItem(
-                Material.PAPER,
-                "&e价格物品1",
-                "&7将价格物品1放入此槽位",
-                "&7（点击下方添加按钮时读取）"
-        ));
+        if (npc.isSystem()) {
+            // 系统NPC：支持金币交易和物物交换
+            inv.setItem(27, createItem(
+                    Material.GOLD_INGOT,
+                    "&6金币交易模式",
+                    "&7将产出物品放入下方槽位",
+                    "&7然后在聊天框输入价格",
+                    "&e左键点击设置金币交易"
+            ));
+            inv.setItem(28, createItem(
+                    Material.EMERALD,
+                    "&a物物交换模式",
+                    "&7将价格物品放入下方槽位",
+                    "&7将产出物品也放入下方槽位",
+                    "&e左键点击设置物物交换"
+            ));
+        } else {
+            inv.setItem(27, createItem(
+                    Material.PAPER,
+                    "&e价格物品1",
+                    "&7将价格物品1放入此槽位",
+                    "&7（点击下方添加按钮时读取）"
+            ));
+            inv.setItem(28, createItem(
+                    Material.PAPER,
+                    "&e价格物品2（可选）",
+                    "&7将价格物品2放入此槽位",
+                    "&7不需要则留空"
+            ));
+        }
 
-        // slot 28: 价格2槽位提示
-        inv.setItem(28, createItem(
-                Material.PAPER,
-                "&e价格物品2（可选）",
-                "&7将价格物品2放入此槽位",
-                "&7不需要则留空"
-        ));
-
-        // slot 29: 产出物品槽位提示
         inv.setItem(29, createItem(
                 Material.PAPER,
-                "&e产出物品",
+                "&e产出物品槽位",
                 "&7将产出物品放入此槽位"
         ));
 
-        // slot 30: 添加按钮
         inv.setItem(30, createItem(
                 Material.EMERALD,
                 "&a&l点击添加交易",
@@ -102,7 +116,6 @@ public class ShopGui {
                 "&7创建新的交易配方"
         ));
 
-        // slot 31: 最大交易次数设置
         inv.setItem(31, createItem(
                 Material.ANVIL,
                 "&6最大交易次数",
@@ -110,13 +123,10 @@ public class ShopGui {
                 "&7点击修改最大交易次数"
         ));
 
-        // 填充第4行剩余槽位
         for (int i = 32; i < 36; i++) {
             inv.setItem(i, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
         }
 
-        // 第5行：分页和返回
-        // slot 36: 上一页
         boolean hasPrev = page > 0;
         inv.setItem(36, createItem(
                 hasPrev ? Material.ARROW : Material.LEVER,
@@ -124,7 +134,6 @@ public class ShopGui {
                 hasPrev ? "&7左键点击上一页" : "&c没有上一页了"
         ));
 
-        // slot 40: 下一页
         int totalPages = Math.max(1, (trades.size() + tradesPerPage - 1) / tradesPerPage);
         boolean hasNext = page < totalPages - 1;
         inv.setItem(40, createItem(
@@ -133,14 +142,12 @@ public class ShopGui {
                 hasNext ? "&7左键点击下一页" : "&c没有下一页了"
         ));
 
-        // slot 44: 返回按钮
         inv.setItem(44, createItem(
                 Material.BARRIER,
                 "&c返回",
                 "&7左键点击返回主界面"
         ));
 
-        // 填充第5行剩余槽位
         for (int i = 37; i < 40; i++) {
             inv.setItem(i, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
         }
@@ -251,21 +258,23 @@ public class ShopGui {
 
     /**
      * 创建交易配方展示物品（编辑界面用）
-     * 显示产出物品，Lore显示价格和使用次数
      */
     private static ItemStack createTradeDisplayItem(ShopTrade trade, int index) {
         ItemStack result = trade.getResult().clone();
         ItemMeta meta = result.getItemMeta();
         if (meta != null) {
-            // 修改名称，加上编号
             String originalName = meta.hasDisplayName() ? meta.getDisplayName() : result.getType().name();
             meta.setDisplayName(PhilosNPCPlugin.cc("&a交易 #" + (index + 1) + " - " + originalName));
 
             List<String> lore = new ArrayList<>();
             lore.add(PhilosNPCPlugin.cc("&7&m-------------------"));
-            lore.add(PhilosNPCPlugin.cc("&e价格1: &f" + formatItem(trade.getPrice1())));
-            if (trade.getPrice2() != null) {
-                lore.add(PhilosNPCPlugin.cc("&e价格2: &f" + formatItem(trade.getPrice2())));
+            if (trade.isUseCurrency()) {
+                lore.add(PhilosNPCPlugin.cc("&e价格: &6" + trade.getCurrencyPrice() + " 金币"));
+            } else {
+                lore.add(PhilosNPCPlugin.cc("&e价格1: &f" + formatItem(trade.getPrice1())));
+                if (trade.getPrice2() != null) {
+                    lore.add(PhilosNPCPlugin.cc("&e价格2: &f" + formatItem(trade.getPrice2())));
+                }
             }
             lore.add(PhilosNPCPlugin.cc("&e产出: &f" + formatItem(trade.getResult())));
             lore.add(PhilosNPCPlugin.cc("&7&m-------------------"));
@@ -293,9 +302,13 @@ public class ShopGui {
 
             List<String> lore = new ArrayList<>();
             lore.add(PhilosNPCPlugin.cc("&7&m-------------------"));
-            lore.add(PhilosNPCPlugin.cc("&e价格: &f" + formatItem(trade.getPrice1())));
-            if (trade.getPrice2() != null) {
-                lore.add(PhilosNPCPlugin.cc("&e     + &f" + formatItem(trade.getPrice2())));
+            if (trade.isUseCurrency()) {
+                lore.add(PhilosNPCPlugin.cc("&e价格: &6" + trade.getCurrencyPrice() + " 金币"));
+            } else {
+                lore.add(PhilosNPCPlugin.cc("&e价格: &f" + formatItem(trade.getPrice1())));
+                if (trade.getPrice2() != null) {
+                    lore.add(PhilosNPCPlugin.cc("&e     + &f" + formatItem(trade.getPrice2())));
+                }
             }
             lore.add(PhilosNPCPlugin.cc("&7&m-------------------"));
             if (!trade.canUse()) {
@@ -325,10 +338,14 @@ public class ShopGui {
 
             List<String> lore = new ArrayList<>();
             lore.add(PhilosNPCPlugin.cc("&7&m-------------------"));
-            lore.add(PhilosNPCPlugin.cc("&e&l所需物品:"));
-            lore.add(PhilosNPCPlugin.cc("&f  " + formatItem(trade.getPrice1())));
-            if (trade.getPrice2() != null) {
-                lore.add(PhilosNPCPlugin.cc("&f  " + formatItem(trade.getPrice2())));
+            if (trade.isUseCurrency()) {
+                lore.add(PhilosNPCPlugin.cc("&e&l价格: &6" + trade.getCurrencyPrice() + " 金币"));
+            } else {
+                lore.add(PhilosNPCPlugin.cc("&e&l所需物品:"));
+                lore.add(PhilosNPCPlugin.cc("&f  " + formatItem(trade.getPrice1())));
+                if (trade.getPrice2() != null) {
+                    lore.add(PhilosNPCPlugin.cc("&f  " + formatItem(trade.getPrice2())));
+                }
             }
             lore.add(PhilosNPCPlugin.cc("&7&m-------------------"));
             lore.add(PhilosNPCPlugin.cc("&e&l你将获得:"));

@@ -130,6 +130,32 @@ public class NPCManager {
         return npc;
     }
 
+    public PhilosNPC createSystemNPC(Player admin, String entityTypeName) {
+        PhilosNPC npc = new PhilosNPC(admin.getName(), admin.getUniqueId(), admin.getLocation());
+        npc.setNpcType(NPCType.SYSTEM);
+        npc.setEntityTypeName(entityTypeName);
+
+        // 解析显示名
+        if (entityTypeName.startsWith("PLAYER:")) {
+            String playerName = entityTypeName.substring(7);
+            npc.setDisplayName(playerName);
+        } else {
+            try {
+                EntityType type = EntityType.valueOf(entityTypeName.toUpperCase());
+                npc.setDisplayName(type.name());
+            } catch (IllegalArgumentException e) {
+                npc.setDisplayName(entityTypeName);
+            }
+        }
+
+        npcs.put(npc.getId(), npc);
+        spawnNPC(npc);
+        saveAll();
+
+        admin.sendMessage(PhilosNPCPlugin.cc("&d系统NPC创建成功！"));
+        return npc;
+    }
+
     public boolean deleteNPC(String id) {
         PhilosNPC npc = npcs.get(id);
         if (npc == null) return false;
@@ -199,10 +225,16 @@ public class NPCManager {
 
         World world = loc.getWorld();
 
-        // 使用 ArmorStand 作为 NPC 实体载体
+        if (npc.isSystem() && npc.getEntityTypeName() != null) {
+            spawnSystemNPC(npc, loc, world);
+        } else {
+            spawnPersonalNPC(npc, loc, world);
+        }
+    }
+
+    private void spawnPersonalNPC(PhilosNPC npc, Location loc, World world) {
         ArmorStand entity = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
 
-        // 基础设置
         entity.setCustomName(PhilosNPCPlugin.cc(npc.getDisplayName()));
         entity.setCustomNameVisible(true);
         entity.setInvulnerable(true);
@@ -210,18 +242,13 @@ public class NPCManager {
         entity.setSilent(true);
         entity.setPersistent(true);
 
-        // 设置大小（scale）- 使用反射兼容不同版本
         try {
             var method = entity.getClass().getMethod("setScale", float.class);
             method.invoke(entity, (float) npc.getScale());
         } catch (Exception ignored) {
-            // 旧版本不支持 scale，使用 setSmall 模拟
-            if (npc.getScale() < 0.75) {
-                entity.setSmall(true);
-            }
+            if (npc.getScale() < 0.75) entity.setSmall(true);
         }
 
-        // 设置装备
         EntityEquipment eq = entity.getEquipment();
         if (eq != null) {
             ItemStack[] equipment = npc.getEquipment();
@@ -232,16 +259,103 @@ public class NPCManager {
             if (equipment[4] != null) eq.setItemInMainHand(equipment[4], true);
         }
 
-        // 根据 pose 设置姿态
         applyPose(entity, npc.getPose());
 
-        // PersistentDataContainer 存储 npc_id
         NamespacedKey key = PhilosNPCPlugin.npcIdKey();
-        PersistentDataContainer pdc = entity.getPersistentDataContainer();
-        pdc.set(key, PersistentDataType.STRING, npc.getId());
-
-        // 记录实体ID映射
+        entity.getPersistentDataContainer().set(key, PersistentDataType.STRING, npc.getId());
         entityIdMap.put(entity.getEntityId(), npc.getId());
+    }
+
+    private void spawnSystemNPC(PhilosNPC npc, Location loc, World world) {
+        String typeName = npc.getEntityTypeName();
+
+        if (typeName.startsWith("PLAYER:")) {
+            // 玩家型系统NPC：用ArmorStand + 指定玩家头颅
+            String playerName = typeName.substring(7);
+            ArmorStand entity = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
+
+            entity.setCustomName(PhilosNPCPlugin.cc(npc.getDisplayName()));
+            entity.setCustomNameVisible(true);
+            entity.setInvulnerable(true);
+            entity.setGravity(false);
+            entity.setSilent(true);
+            entity.setPersistent(true);
+
+            try {
+                var method = entity.getClass().getMethod("setScale", float.class);
+                method.invoke(entity, (float) npc.getScale());
+            } catch (Exception ignored) {
+                if (npc.getScale() < 0.75) entity.setSmall(true);
+            }
+
+            // 设置玩家头颅
+            var skull = new org.bukkit.inventory.ItemStack(org.bukkit.Material.PLAYER_HEAD);
+            var skullMeta = (org.bukkit.inventory.meta.SkullMeta) skull.getItemMeta();
+            if (skullMeta != null) {
+                skullMeta.setOwner(playerName);
+                skull.setItemMeta(skullMeta);
+            }
+            EntityEquipment eq = entity.getEquipment();
+            if (eq != null) {
+                eq.setHelmet(skull, true);
+                ItemStack[] equipment = npc.getEquipment();
+                if (equipment != null) {
+                    if (equipment[1] != null) eq.setChestplate(equipment[1], true);
+                    if (equipment[2] != null) eq.setLeggings(equipment[2], true);
+                    if (equipment[3] != null) eq.setBoots(equipment[3], true);
+                    if (equipment[4] != null) eq.setItemInMainHand(equipment[4], true);
+                }
+            }
+
+            applyPose(entity, npc.getPose());
+
+            entity.getPersistentDataContainer().set(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING, npc.getId());
+            entityIdMap.put(entity.getEntityId(), npc.getId());
+        } else {
+            // 生物型系统NPC：生成实际生物实体
+            try {
+                EntityType entityType = EntityType.valueOf(typeName.toUpperCase());
+                var entity = world.spawnEntity(loc, entityType, SpawnReason.CUSTOM);
+
+                if (entity instanceof LivingEntity living) {
+                    living.setCustomName(PhilosNPCPlugin.cc(npc.getDisplayName()));
+                    living.setCustomNameVisible(true);
+                    living.setInvulnerable(true);
+                    living.setSilent(true);
+                    living.setPersistent(true);
+                    living.setRemoveWhenFarAway(false);
+
+                    // 尝试关闭AI
+                    try {
+                        living.setAI(false);
+                    } catch (Exception ignored) {}
+
+                    // 设置装备
+                    EntityEquipment eq = living.getEquipment();
+                    if (eq != null) {
+                        ItemStack[] equipment = npc.getEquipment();
+                        if (equipment != null) {
+                            if (equipment[0] != null) eq.setHelmet(equipment[0], true);
+                            if (equipment[1] != null) eq.setChestplate(equipment[1], true);
+                            if (equipment[2] != null) eq.setLeggings(equipment[2], true);
+                            if (equipment[3] != null) eq.setBoots(equipment[3], true);
+                            if (equipment[4] != null) eq.setItemInMainHand(equipment[4], true);
+                        }
+                    }
+
+                    // 设置大小
+                    try {
+                        var method = living.getClass().getMethod("setScale", float.class);
+                        method.invoke(living, (float) npc.getScale());
+                    } catch (Exception ignored) {}
+                }
+
+                entity.getPersistentDataContainer().set(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING, npc.getId());
+                entityIdMap.put(entity.getEntityId(), npc.getId());
+            } catch (IllegalArgumentException e) {
+                plugin.getLogger().warning("无法创建系统NPC，未知实体类型: " + typeName);
+            }
+        }
     }
 
     public void despawnNPC(PhilosNPC npc) {
@@ -269,11 +383,9 @@ public class NPCManager {
     public void despawnAll() {
         for (World world : Bukkit.getWorlds()) {
             for (Entity entity : world.getEntities()) {
-                if (entity instanceof ArmorStand) {
-                    PersistentDataContainer pdc = entity.getPersistentDataContainer();
-                    if (pdc.has(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING)) {
-                        entity.remove();
-                    }
+                PersistentDataContainer pdc = entity.getPersistentDataContainer();
+                if (pdc.has(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING)) {
+                    entity.remove();
                 }
             }
         }
@@ -321,24 +433,21 @@ public class NPCManager {
         Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             for (World world : Bukkit.getWorlds()) {
                 for (Entity entity : world.getEntities()) {
-                    if (!(entity instanceof ArmorStand)) continue;
-
                     PersistentDataContainer pdc = entity.getPersistentDataContainer();
                     if (!pdc.has(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING)) continue;
 
-                    ArmorStand stand = (ArmorStand) entity;
+                    if (entity instanceof LivingEntity living) {
+                        float currentYaw = living.getLocation().getYaw();
+                        float delta = (float) (Math.random() * 10.0 - 5.0);
+                        float newYaw = currentYaw + delta;
 
-                    // 随机微调头部yaw
-                    float currentYaw = stand.getLocation().getYaw();
-                    float delta = (float) (Math.random() * 10.0 - 5.0); // -5 到 +5 度
-                    float newYaw = currentYaw + delta;
-
-                    Location loc = stand.getLocation();
-                    loc.setYaw(newYaw);
-                    stand.teleport(loc);
+                        Location loc = living.getLocation();
+                        loc.setYaw(newYaw);
+                        living.teleport(loc);
+                    }
                 }
             }
-        }, 20L, 20L); // 每秒微调一次
+        }, 20L, 20L);
     }
 
     // ===== 辅助方法 =====

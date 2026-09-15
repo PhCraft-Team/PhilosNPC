@@ -4,24 +4,24 @@
   "main": "com.phcraft.philosnpc.PhilosNPCPlugin",
   "api-version": "1.21",
   "author": "PhCraft Team",
-  "description": "功能NPC插件 - 创建可交互的玩家NPC",
+  "description": "功能NPC插件 - 创建可交互的玩家/系统NPC，支持商店/传送/点歌/留言",
   "dependencies": [
     "Vault"
   ],
   "commands": {
     "philosnpc": {
       "description": "PhilosNPC 主命令",
-      "usage": "/philosnpc <create|list|tp|reload>",
+      "usage": "/philosnpc <create|syscreate|list|edit|move|delete|tp|reload>",
       "aliases": ["pnpc"]
     }
   },
   "permissions": {
     "philosnpc.create": {
-      "description": "创建NPC",
+      "description": "创建个人NPC",
       "default": true
     },
     "philosnpc.admin": {
-      "description": "管理员权限",
+      "description": "管理员权限（创建系统NPC等）",
       "default": "op"
     }
   }

@@ -42,12 +42,14 @@ public class TeleportFeature {
             return false;
         }
 
+        double cost = npc.getEffectiveTeleportCost();
+
         // 扣除费用
-        if (PhilosNPCPlugin.economy() != null) {
-            EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, TELEPORT_COST);
+        if (PhilosNPCPlugin.economy() != null && cost > 0) {
+            EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, cost);
             if (!resp.transactionSuccess()) {
                 player.sendMessage(PhilosNPCPlugin.cc(
-                        "&c金币不足！传送需要 " + TELEPORT_COST + " 金币"));
+                        "&c金币不足！传送需要 " + cost + " 金币"));
                 return false;
             }
         }
@@ -55,7 +57,7 @@ public class TeleportFeature {
         // 执行传送
         player.teleport(target);
         player.sendMessage(PhilosNPCPlugin.cc(
-                "&a已传送到目标地点，花费 " + TELEPORT_COST + " 金币"));
+                "&a已传送到目标地点，花费 " + cost + " 金币"));
 
         // 执行奖励命令
         String rewardCmd = npc.getTeleportRewardCmd();

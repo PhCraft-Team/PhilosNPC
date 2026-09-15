@@ -89,42 +89,62 @@ public class ShopHandler {
         }
 
         PlayerInventory playerInv = customer.getInventory();
+        boolean isSystem = npc.isSystem();
 
-        // 检查玩家是否有足够的价格物品1
-        if (!hasEnoughItem(playerInv, trade.getPrice1())) {
-            return TradeResult.NOT_ENOUGH_PRICE1;
+        if (trade.isUseCurrency()) {
+            // 金币交易
+            if (PhilosNPCPlugin.economy() == null) {
+                return TradeResult.FAILED;
+            }
+            if (!PhilosNPCPlugin.economy().has(customer, trade.getCurrencyPrice())) {
+                return TradeResult.NOT_ENOUGH_MONEY;
+            }
+            // 检查玩家背包是否有足够空间
+            if (!playerInv.addItem(trade.getResult().clone()).isEmpty()) {
+                return TradeResult.INVENTORY_FULL;
+            }
+            // 扣除金币
+            PhilosNPCPlugin.economy().withdrawPlayer(customer, trade.getCurrencyPrice());
+            // 给予物品
+            playerInv.addItem(trade.getResult().clone());
+        } else {
+            // 物物交换
+            if (!hasEnoughItem(playerInv, trade.getPrice1())) {
+                return TradeResult.NOT_ENOUGH_PRICE1;
+            }
+            if (trade.getPrice2() != null && !hasEnoughItem(playerInv, trade.getPrice2())) {
+                return TradeResult.NOT_ENOUGH_PRICE2;
+            }
+
+            if (!isSystem) {
+                // 个人NPC：检查商店背包库存
+                ItemStack[] shopInv = npcManager.getSharedShopInventory(npc.getOwnerUuid());
+                if (!hasEnoughItemInInventory(shopInv, trade.getResult())) {
+                    return TradeResult.SHOP_OUT_OF_STOCK;
+                }
+            }
+
+            // 检查玩家背包是否有足够空间
+            if (!playerInv.addItem(trade.getResult().clone()).isEmpty()) {
+                return TradeResult.INVENTORY_FULL;
+            }
+
+            // 扣除玩家的价格物品
+            removeItem(playerInv, trade.getPrice1());
+            if (trade.getPrice2() != null) {
+                removeItem(playerInv, trade.getPrice2());
+            }
+
+            // 个人NPC：从商店背包中扣除产出物品
+            if (!isSystem) {
+                ItemStack[] shopInv = npcManager.getSharedShopInventory(npc.getOwnerUuid());
+                removeItemFromInventory(shopInv, trade.getResult());
+                npcManager.setSharedShopInventory(npc.getOwnerUuid(), shopInv);
+            }
         }
-
-        // 检查玩家是否有足够的价格物品2（如果有）
-        if (trade.getPrice2() != null && !hasEnoughItem(playerInv, trade.getPrice2())) {
-            return TradeResult.NOT_ENOUGH_PRICE2;
-        }
-
-        // 检查商店背包中是否有足够的产出物品（从共享背包扣除）
-        ItemStack[] shopInv = npcManager.getSharedShopInventory(npc.getOwnerUuid());
-        if (!hasEnoughItemInInventory(shopInv, trade.getResult())) {
-            return TradeResult.SHOP_OUT_OF_STOCK;
-        }
-
-        // 检查玩家背包是否有足够空间
-        if (!playerInv.addItem(trade.getResult().clone()).isEmpty()) {
-            return TradeResult.INVENTORY_FULL;
-        }
-
-        // 扣除玩家的价格物品
-        removeItem(playerInv, trade.getPrice1());
-        if (trade.getPrice2() != null) {
-            removeItem(playerInv, trade.getPrice2());
-        }
-
-        // 从商店背包中扣除产出物品
-        removeItemFromInventory(shopInv, trade.getResult());
-        npcManager.setSharedShopInventory(npc.getOwnerUuid(), shopInv);
 
         // 更新交易次数
         trade.incrementUses();
-
-        // 保存数据
         npcManager.saveAll();
 
         return TradeResult.SUCCESS;
@@ -234,26 +254,21 @@ public class ShopHandler {
         OUT_OF_STOCK,     // 交易次数用完
         NOT_ENOUGH_PRICE1, // 价格1物品不足
         NOT_ENOUGH_PRICE2, // 价格2物品不足
+        NOT_ENOUGH_MONEY,  // 金币不足
         SHOP_OUT_OF_STOCK, // 商店库存不足
         INVENTORY_FULL;    // 玩家背包已满
 
         public String getMessage() {
-            switch (this) {
-                case SUCCESS:
-                    return PhilosNPCPlugin.cc("&a交易成功！");
-                case OUT_OF_STOCK:
-                    return PhilosNPCPlugin.cc("&c该商品已售罄！");
-                case NOT_ENOUGH_PRICE1:
-                    return PhilosNPCPlugin.cc("&c你没有足够的价格物品1！");
-                case NOT_ENOUGH_PRICE2:
-                    return PhilosNPCPlugin.cc("&c你没有足够的价格物品2！");
-                case SHOP_OUT_OF_STOCK:
-                    return PhilosNPCPlugin.cc("&c商店库存不足，请联系店主补货！");
-                case INVENTORY_FULL:
-                    return PhilosNPCPlugin.cc("&c你的背包已满，请先腾出空间！");
-                default:
-                    return PhilosNPCPlugin.cc("&c交易失败，请稍后重试！");
-            }
+            return switch (this) {
+                case SUCCESS -> PhilosNPCPlugin.cc("&a交易成功！");
+                case OUT_OF_STOCK -> PhilosNPCPlugin.cc("&c该商品已售罄！");
+                case NOT_ENOUGH_PRICE1 -> PhilosNPCPlugin.cc("&c你没有足够的价格物品1！");
+                case NOT_ENOUGH_PRICE2 -> PhilosNPCPlugin.cc("&c你没有足够的价格物品2！");
+                case NOT_ENOUGH_MONEY -> PhilosNPCPlugin.cc("&c金币不足！");
+                case SHOP_OUT_OF_STOCK -> PhilosNPCPlugin.cc("&c商店库存不足，请联系店主补货！");
+                case INVENTORY_FULL -> PhilosNPCPlugin.cc("&c你的背包已满，请先腾出空间！");
+                default -> PhilosNPCPlugin.cc("&c交易失败，请稍后重试！");
+            };
         }
     }
 }

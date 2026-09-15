@@ -49,6 +49,30 @@ public class PhilosCommand implements CommandExecutor {
                     gui.openMainGui(player, npc);
                 }
             }
+            case "syscreate" -> {
+                if (!player.hasPermission("philosnpc.admin")) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c只有管理员可以创建系统NPC"));
+                    return true;
+                }
+                if (args.length < 2) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c用法: /" + label + " syscreate <类型>"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&7类型示例: &fZOMBIE, SKELETON, CREEPER, PLAYER:Notch"));
+                    return true;
+                }
+                String entityType = args[1].toUpperCase();
+                if (!entityType.startsWith("PLAYER:")) {
+                    try {
+                        org.bukkit.entity.EntityType.valueOf(entityType);
+                    } catch (IllegalArgumentException e) {
+                        player.sendMessage(PhilosNPCPlugin.cc("&c未知实体类型: " + entityType));
+                        return true;
+                    }
+                }
+                PhilosNPC sysNpc = mgr.createSystemNPC(player, entityType);
+                if (sysNpc != null) {
+                    gui.openMainGui(player, sysNpc);
+                }
+            }
             case "list" -> {
                 List<PhilosNPC> npcs = mgr.getNPCsByOwner(player.getUniqueId());
                 if (npcs.isEmpty()) {
@@ -184,6 +208,8 @@ public class PhilosCommand implements CommandExecutor {
         player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " delete <id> &7- 删除NPC"));
         player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " tp <id> &7- 传送到NPC (花费" + PhilosNPCPlugin.TP_TO_NPC_COST + "金币)"));
         if (player.hasPermission("philosnpc.admin")) {
+            player.sendMessage(PhilosNPCPlugin.cc("&d/" + label + " syscreate <类型> &7- 创建系统NPC (管理员)"));
+            player.sendMessage(PhilosNPCPlugin.cc("&d  &7类型: ZOMBIE/SKELETON/CREEPER/PLAYER:玩家名"));
             player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " reload &7- 重载配置 (管理员)"));
         }
     }

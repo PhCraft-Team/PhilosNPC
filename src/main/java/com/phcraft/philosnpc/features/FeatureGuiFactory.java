@@ -84,13 +84,25 @@ public class FeatureGuiFactory {
             ));
         }
 
-        // slot 22: 价格显示（固定5元，灰色不可改）
-        inv.setItem(22, createItem(
-                Material.GOLD_INGOT,
-                "&7传送价格",
+        // slot 22: 价格显示
+        if (npc.isSystem()) {
+            // 系统NPC：管理员可自定义价格
+            double cost = npc.getEffectiveTeleportCost();
+            inv.setItem(22, createItem(
+                    Material.GOLD_INGOT,
+                    npc.getCustomTeleportCost() >= 0 ? "&6传送价格（可自定义）" : "&7传送价格",
+                    "&f" + cost + " 金币",
+                    npc.getCustomTeleportCost() >= 0 ? "&7管理员已自定义价格" : "&7默认价格",
+                    "&e左键点击修改价格"
+            ));
+        } else {
+            inv.setItem(22, createItem(
+                    Material.GOLD_INGOT,
+                    "&7传送价格",
                     "&f" + TeleportFeature.getTeleportCost() + " 金币",
                     "&7（固定价格，不可修改）"
-        ));
+            ));
+        }
 
         // slot 27: 返回按钮
         inv.setItem(27, createItem(
@@ -313,7 +325,7 @@ public class FeatureGuiFactory {
                     material,
                     name,
                     desc,
-                    "&7价格: &6" + TeleportFeature.getTeleportCost() + " 金币",
+                    "&7价格: &6" + npc.getEffectiveTeleportCost() + " 金币",
                     clickHint
             );
         }

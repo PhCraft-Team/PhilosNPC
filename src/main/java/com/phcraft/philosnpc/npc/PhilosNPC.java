@@ -2,6 +2,7 @@ package com.phcraft.philosnpc.npc;
 
 import com.phcraft.philosnpc.PhilosNPCPlugin;
 import com.phcraft.philosnpc.features.ShopTrade;
+import com.phcraft.philosnpc.features.TeleportFeature;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -20,6 +21,13 @@ public class PhilosNPC {
     private List<FeatureType> features;
     private String displayName;
     private ItemStack[] equipment; // 5格: 头盔, 胸甲, 护腿, 靴子, 主手
+
+    // NPC类型
+    private NPCType npcType = NPCType.PERSONAL;
+    // 系统NPC实体类型名称（如 "ZOMBIE", "SKELETON", "PLAYER:Notch"）
+    private String entityTypeName = null;
+    // 系统NPC自定义传送费用（-1表示使用默认）
+    private double customTeleportCost = -1;
 
     // 商店相关
     private ItemStack[] shopInventory; // 36格共享商店背包
@@ -116,6 +124,21 @@ public class PhilosNPC {
     public long getCreatedAt() { return createdAt; }
     public void setCreatedAt(long createdAt) { this.createdAt = createdAt; }
 
+    public NPCType getNpcType() { return npcType; }
+    public void setNpcType(NPCType npcType) { this.npcType = npcType; }
+
+    public String getEntityTypeName() { return entityTypeName; }
+    public void setEntityTypeName(String entityTypeName) { this.entityTypeName = entityTypeName; }
+
+    public double getCustomTeleportCost() { return customTeleportCost; }
+    public void setCustomTeleportCost(double cost) { this.customTeleportCost = cost; }
+
+    public boolean isSystem() { return npcType == NPCType.SYSTEM; }
+
+    public double getEffectiveTeleportCost() {
+        return isSystem() && customTeleportCost >= 0 ? customTeleportCost : TeleportFeature.getTeleportCost();
+    }
+
     // ===== Feature 管理 =====
 
     public boolean addFeature(FeatureType feature) {
@@ -206,6 +229,9 @@ public class PhilosNPC {
 
         map.put("message", message);
         map.put("createdAt", createdAt);
+        map.put("npcType", npcType.name());
+        if (entityTypeName != null) map.put("entityTypeName", entityTypeName);
+        map.put("customTeleportCost", customTeleportCost);
 
         return map;
     }
@@ -282,6 +308,9 @@ public class PhilosNPC {
 
         npc.message = (String) map.getOrDefault("message", "");
         npc.createdAt = map.containsKey("createdAt") ? ((Number) map.get("createdAt")).longValue() : System.currentTimeMillis();
+        npc.npcType = map.containsKey("npcType") ? NPCType.valueOf((String) map.get("npcType")) : NPCType.PERSONAL;
+        npc.entityTypeName = (String) map.get("entityTypeName");
+        npc.customTeleportCost = map.containsKey("customTeleportCost") ? ((Number) map.get("customTeleportCost")).doubleValue() : -1;
 
         return npc;
     }

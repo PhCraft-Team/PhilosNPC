@@ -61,9 +61,15 @@ public class GuiManager implements Listener {
     }
 
     public void openShopEditGui(Player player, PhilosNPC npc) {
-        var inv = com.phcraft.philosnpc.features.ShopGui.shopInventoryGui(npc);
-        openGuis.put(player, new GuiState(GuiState.Screen.SHOP_EDIT, npc.getId(), 0, new HashMap<>()));
-        player.openInventory(inv);
+        if (npc.isSystem()) {
+            // 系统NPC直接打开交易配方编辑界面
+            openTradeEditGui(player, npc, 0);
+        } else {
+            // 个人NPC打开商店背包编辑界面
+            var inv = com.phcraft.philosnpc.features.ShopGui.shopInventoryGui(npc);
+            openGuis.put(player, new GuiState(GuiState.Screen.SHOP_EDIT, npc.getId(), 0, new HashMap<>()));
+            player.openInventory(inv);
+        }
     }
 
     public void openTradeEditGui(Player player, PhilosNPC npc, int page) {
@@ -118,14 +124,20 @@ public class GuiManager implements Listener {
             var head = new ItemStack(Material.PLAYER_HEAD);
             var meta = (SkullMeta) head.getItemMeta();
             if (meta != null) {
-                meta.setDisplayName(PhilosNPCPlugin.cc("&b" + npc.getDisplayName()));
+                String color = npc.isSystem() ? "&d" : "&b";
+                meta.setDisplayName(PhilosNPCPlugin.cc(color + npc.getDisplayName()));
                 var lore = new ArrayList<String>();
+                lore.add(PhilosNPCPlugin.cc("&7类型: &f" + npc.getNpcType().displayName()));
                 lore.add(PhilosNPCPlugin.cc("&7ID: &f" + npc.getId().substring(0, 8)));
                 lore.add(PhilosNPCPlugin.cc("&7姿势: &f" + npc.getPose().displayName()));
                 lore.add(PhilosNPCPlugin.cc("&7功能: &f" + npc.getFeatures().size() + "/4"));
                 lore.add(PhilosNPCPlugin.cc("&e左键点击编辑"));
                 meta.setLore(lore);
-                if (npc.getOwnerName() != null) meta.setOwner(npc.getOwnerName());
+                if (npc.isSystem() && npc.getEntityTypeName() != null && npc.getEntityTypeName().startsWith("PLAYER:")) {
+                    meta.setOwner(npc.getEntityTypeName().substring(7));
+                } else if (npc.getOwnerName() != null) {
+                    meta.setOwner(npc.getOwnerName());
+                }
                 head.setItemMeta(meta);
             }
             inv.setItem(slot, head);
@@ -191,7 +203,14 @@ public class GuiManager implements Listener {
         // 部分界面允许物品交互
         boolean allowInteract = false;
         if (state.getScreen() == GuiState.Screen.SHOP_EDIT && slot < 36) {
-            allowInteract = true;
+            int invSize = event.getInventory().getSize();
+            if (invSize == 45 && npc != null && !npc.isSystem()) {
+                // 个人NPC商店背包编辑界面
+                allowInteract = true;
+            } else if (invSize == 54 && (slot == 27 || slot == 28 || slot == 29)) {
+                // 交易配方编辑界面的价格/产出槽位
+                allowInteract = true;
+            }
         } else if (state.getScreen() == GuiState.Screen.JUKEBOX_EDIT && slot >= 9 && slot <= 17) {
             allowInteract = true;
         }
@@ -423,12 +442,24 @@ public class GuiManager implements Listener {
 
     private void handleShopEditClick(Player player, PhilosNPC npc, int slot, GuiState state) {
         if (npc == null) return;
+        int invSize = player.getOpenInventory().getTopInventory().getSize();
+
+        // 交易配方编辑界面（54格）
+        if (invSize == 54) {
+            handleTradeEditClick(player, npc, slot, state);
+            return;
+        }
+
+        // 商店背包编辑界面（45格）
         if (slot == 36) { // 返回
             openMainGui(player, npc);
             return;
         }
         if (slot == 40) { // 保存
-            // 读取当前背包物品到共享商店背包
+            if (npc.isSystem()) {
+                openMainGui(player, npc);
+                return;
+            }
             var inv = player.getOpenInventory().getTopInventory();
             var items = new org.bukkit.inventory.ItemStack[36];
             for (int i = 0; i < 36; i++) {
@@ -440,7 +471,103 @@ public class GuiManager implements Listener {
             openMainGui(player, npc);
             return;
         }
-        // slot 0-35 已在 onInventoryClick 中允许交互
+    }
+
+    // ===== 交易配方编辑界面点击处理 =====
+
+    private void handleTradeEditClick(Player player, PhilosNPC npc, int slot, GuiState state) {
+        int page = state.getPage();
+
+        // slot 0-8: 删除交易配方
+        if (slot >= 0 && slot < 9) {
+            int tradeIndex = page * 9 + slot;
+            if (tradeIndex < npc.getTrades().size()) {
+                npc.getTrades().remove(tradeIndex);
+                npcManager.saveAll();
+                player.sendMessage(PhilosNPCPlugin.cc("&c交易已删除"));
+                openTradeEditGui(player, npc, page);
+            }
+            return;
+        }
+
+        switch (slot) {
+            case 27: // 金币交易模式（系统NPC）或价格物品1提示（个人NPC）
+                if (npc.isSystem()) {
+                    // 切换为金币交易模式
+                    state.getData().put("useCurrency", true);
+                    player.sendMessage(PhilosNPCPlugin.cc("&6已切换为金币交易模式"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&7请将产出物品放入槽位29，然后点击添加按钮"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&7之后在聊天框输入金币价格"));
+                }
+                break;
+            case 28: // 物物交换模式（系统NPC）或价格物品2提示（个人NPC）
+                if (npc.isSystem()) {
+                    state.getData().put("useCurrency", false);
+                    player.sendMessage(PhilosNPCPlugin.cc("&a已切换为物物交换模式"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&7请将价格物品和产出物品放入对应槽位"));
+                }
+                break;
+            case 30: // 添加交易
+                handleAddTradeClick(player, npc, state);
+                break;
+            case 36: // 上一页
+                if (page > 0) openTradeEditGui(player, npc, page - 1);
+                break;
+            case 40: // 下一页
+                openTradeEditGui(player, npc, page + 1);
+                break;
+            case 44: // 返回
+                if (npc.isSystem()) {
+                    openMainGui(player, npc);
+                } else {
+                    openMainGui(player, npc);
+                }
+                break;
+        }
+    }
+
+    private void handleAddTradeClick(Player player, PhilosNPC npc, GuiState state) {
+        var inv = player.getOpenInventory().getTopInventory();
+        var slot29Item = inv.getItem(29);
+
+        if (slot29Item == null || slot29Item.getType() == Material.AIR) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c请先将产出物品放入槽位29"));
+            return;
+        }
+
+        ItemStack result = slot29Item.clone();
+
+        if (npc.isSystem() && Boolean.TRUE.equals(state.getData().get("useCurrency"))) {
+            // 金币交易：提示输入价格
+            player.closeInventory();
+            player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入金币价格（输入 &ccancel &a取消）："));
+            state.getData().put("pendingResult", result);
+            pendingCurrencyTrade.put(player.getUniqueId(), npc.getId());
+            return;
+        }
+
+        // 物物交换
+        var price1Item = inv.getItem(27);
+        var price2Item = inv.getItem(28);
+
+        ItemStack price1 = (price1Item != null && price1Item.getType() != Material.AIR) ? price1Item.clone() : null;
+        ItemStack price2 = (price2Item != null && price2Item.getType() != Material.AIR) ? price2Item.clone() : null;
+
+        if (price1 == null) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c请将价格物品放入槽位27"));
+            return;
+        }
+
+        var handler = new com.phcraft.philosnpc.features.ShopHandler();
+        handler.addTrade(npc, result, price1, price2, -1);
+        player.sendMessage(PhilosNPCPlugin.cc("&a交易已添加"));
+
+        // 清除槽位
+        inv.setItem(27, null);
+        inv.setItem(28, null);
+        inv.setItem(29, null);
+
+        openTradeEditGui(player, npc, state.getPage());
     }
 
     // ===== 传送设置点击处理 =====
@@ -457,8 +584,15 @@ public class GuiManager implements Listener {
                 player.closeInventory();
                 player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入奖励命令（输入 &ccancel &a取消）："));
                 player.sendMessage(PhilosNPCPlugin.cc("&7可用占位符: &b{player}"));
-                // 使用聊天监听处理输入
                 pendingRewardCmd.put(player.getUniqueId(), npc.getId());
+                break;
+            case 22: // 传送价格（系统NPC可自定义）
+                if (npc.isSystem()) {
+                    player.closeInventory();
+                    player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入传送价格（输入 &ccancel &a取消）："));
+                    player.sendMessage(PhilosNPCPlugin.cc("&7输入 0 表示免费，输入 -1 恢复默认(5金币)"));
+                    pendingTeleportCost.put(player.getUniqueId(), npc.getId());
+                }
                 break;
             case 27: // 返回
                 openMainGui(player, npc);
@@ -624,11 +758,47 @@ public class GuiManager implements Listener {
 
     private final java.util.Map<java.util.UUID, String> pendingMessage = new java.util.HashMap<>();
     private final java.util.Map<java.util.UUID, String> pendingRewardCmd = new java.util.HashMap<>();
+    private final java.util.Map<java.util.UUID, String> pendingTeleportCost = new java.util.HashMap<>();
+    private final java.util.Map<java.util.UUID, String> pendingCurrencyTrade = new java.util.HashMap<>();
 
     @EventHandler
     public void onPlayerChat(org.bukkit.event.player.AsyncPlayerChatEvent event) {
         var player = event.getPlayer();
         String msg = event.getMessage();
+
+        if (pendingCurrencyTrade.containsKey(player.getUniqueId())) {
+            event.setCancelled(true);
+            String npcId = pendingCurrencyTrade.remove(player.getUniqueId());
+            var npc = npcManager.getNPC(npcId);
+            if (npc == null) return;
+
+            if (msg.equalsIgnoreCase("cancel")) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c已取消添加交易"));
+                return;
+            }
+            try {
+                double price = Double.parseDouble(msg);
+                if (price <= 0) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c价格必须大于0"));
+                    return;
+                }
+                // 读取存储的产出物品
+                var state = openGuis.get(player);
+                ItemStack result = (state != null) ? (ItemStack) state.getData().get("pendingResult") : null;
+                if (result == null) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c产出物品丢失，请重新操作"));
+                    return;
+                }
+                var trade = new com.phcraft.philosnpc.features.ShopTrade(result, price, -1);
+                npc.getTrades().add(trade);
+                npcManager.saveAll();
+                player.sendMessage(PhilosNPCPlugin.cc("&a金币交易已添加: &6" + price + " 金币"));
+                openTradeEditGui(player, npc, 0);
+            } catch (NumberFormatException e) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c无效的数字格式"));
+            }
+            return;
+        }
 
         if (pendingRewardCmd.containsKey(player.getUniqueId())) {
             event.setCancelled(true);
@@ -643,6 +813,33 @@ public class GuiManager implements Listener {
             npc.setTeleportRewardCmd(msg);
             npcManager.saveAll();
             player.sendMessage(PhilosNPCPlugin.cc("&a奖励命令已设置: &f" + msg));
+            return;
+        }
+
+        if (pendingTeleportCost.containsKey(player.getUniqueId())) {
+            event.setCancelled(true);
+            String npcId = pendingTeleportCost.remove(player.getUniqueId());
+            var npc = npcManager.getNPC(npcId);
+            if (npc == null) return;
+
+            if (msg.equalsIgnoreCase("cancel")) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c已取消设置"));
+                return;
+            }
+            try {
+                double cost = Double.parseDouble(msg);
+                npc.setCustomTeleportCost(cost);
+                npcManager.saveAll();
+                if (cost < 0) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&a已恢复默认传送价格"));
+                } else if (cost == 0) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&a传送已设为免费"));
+                } else {
+                    player.sendMessage(PhilosNPCPlugin.cc("&a传送价格已设为: &6" + cost + " 金币"));
+                }
+            } catch (NumberFormatException e) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c无效的数字格式"));
+            }
             return;
         }
 

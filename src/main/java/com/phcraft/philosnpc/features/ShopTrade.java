@@ -13,6 +13,8 @@ public class ShopTrade implements ConfigurationSerializable {
     private ItemStack price2;
     private int maxUses;
     private int uses;
+    private boolean useCurrency;
+    private double currencyPrice;
 
     public ShopTrade(ItemStack result, ItemStack price1, ItemStack price2, int maxUses) {
         this.result = result;
@@ -20,10 +22,18 @@ public class ShopTrade implements ConfigurationSerializable {
         this.price2 = price2;
         this.maxUses = maxUses;
         this.uses = 0;
+        this.useCurrency = false;
+        this.currencyPrice = 0;
     }
 
-    public ShopTrade(ItemStack result, ItemStack price1, int maxUses) {
-        this(result, price1, null, maxUses);
+    public ShopTrade(ItemStack result, double currencyPrice, int maxUses) {
+        this.result = result;
+        this.price1 = null;
+        this.price2 = null;
+        this.maxUses = maxUses;
+        this.uses = 0;
+        this.useCurrency = true;
+        this.currencyPrice = currencyPrice;
     }
 
     public ItemStack getResult() { return result; }
@@ -41,6 +51,12 @@ public class ShopTrade implements ConfigurationSerializable {
     public int getUses() { return uses; }
     public void setUses(int uses) { this.uses = uses; }
 
+    public boolean isUseCurrency() { return useCurrency; }
+    public void setUseCurrency(boolean useCurrency) { this.useCurrency = useCurrency; }
+
+    public double getCurrencyPrice() { return currencyPrice; }
+    public void setCurrencyPrice(double currencyPrice) { this.currencyPrice = currencyPrice; }
+
     public boolean isInfinite() { return maxUses == -1; }
 
     public boolean canUse() {
@@ -57,24 +73,37 @@ public class ShopTrade implements ConfigurationSerializable {
     public Map<String, Object> serialize() {
         Map<String, Object> map = new HashMap<>();
         map.put("result", result.serialize());
-        map.put("price1", price1.serialize());
+        if (price1 != null) {
+            map.put("price1", price1.serialize());
+        }
         if (price2 != null) {
             map.put("price2", price2.serialize());
         }
         map.put("maxUses", maxUses);
         map.put("uses", uses);
+        map.put("useCurrency", useCurrency);
+        map.put("currencyPrice", currencyPrice);
         return map;
     }
 
     public static ShopTrade deserialize(Map<String, Object> map) {
         ItemStack result = ItemStack.deserialize((Map<String, Object>) map.get("result"));
-        ItemStack price1 = ItemStack.deserialize((Map<String, Object>) map.get("price1"));
+        int maxUses = map.containsKey("maxUses") ? ((Number) map.get("maxUses")).intValue() : -1;
+        int uses = map.containsKey("uses") ? ((Number) map.get("uses")).intValue() : 0;
+        boolean useCurrency = map.containsKey("useCurrency") ? (boolean) map.get("useCurrency") : false;
+        double currencyPrice = map.containsKey("currencyPrice") ? ((Number) map.get("currencyPrice")).doubleValue() : 0;
+
+        if (useCurrency) {
+            ShopTrade trade = new ShopTrade(result, currencyPrice, maxUses);
+            trade.setUses(uses);
+            return trade;
+        }
+
+        ItemStack price1 = map.containsKey("price1") ? ItemStack.deserialize((Map<String, Object>) map.get("price1")) : null;
         ItemStack price2 = null;
         if (map.containsKey("price2")) {
             price2 = ItemStack.deserialize((Map<String, Object>) map.get("price2"));
         }
-        int maxUses = map.containsKey("maxUses") ? ((Number) map.get("maxUses")).intValue() : -1;
-        int uses = map.containsKey("uses") ? ((Number) map.get("uses")).intValue() : 0;
         ShopTrade trade = new ShopTrade(result, price1, price2, maxUses);
         trade.setUses(uses);
         return trade;

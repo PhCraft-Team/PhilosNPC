@@ -19,9 +19,10 @@ public class NPCGui {
     // ===== 主界面 =====
 
     public static Inventory mainGui(PhilosNPC npc) {
-        Inventory inv = Bukkit.createInventory(null, 54, PhilosNPCPlugin.cc("&b&lNPC管理 - " + npc.getDisplayName()));
+        String typePrefix = npc.isSystem() ? "&d&l" : "&b&l";
+        Inventory inv = Bukkit.createInventory(null, 54,
+                PhilosNPCPlugin.cc(typePrefix + "NPC管理 - " + npc.getDisplayName()));
 
-        // slot 13: NPC头颅 + 名称 + pose/size信息
         inv.setItem(13, createNPCHead(npc));
 
         // slot 19: 姿势调整按钮 (ARMOR_STAND)
@@ -244,15 +245,23 @@ public class NPCGui {
         ItemStack head = new ItemStack(Material.PLAYER_HEAD);
         SkullMeta meta = (SkullMeta) head.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(PhilosNPCPlugin.cc("&b&l" + npc.getDisplayName()));
+            String color = npc.isSystem() ? "&d&l" : "&b&l";
+            meta.setDisplayName(PhilosNPCPlugin.cc(color + npc.getDisplayName()));
             List<String> lore = new ArrayList<>();
+            lore.add(PhilosNPCPlugin.cc("&7类型: &f" + npc.getNpcType().displayName()));
             lore.add(PhilosNPCPlugin.cc("&7NPC ID: &f" + npc.getId().substring(0, 8) + "..."));
             lore.add(PhilosNPCPlugin.cc("&7主人: &f" + npc.getOwnerName()));
+            if (npc.isSystem() && npc.getEntityTypeName() != null) {
+                lore.add(PhilosNPCPlugin.cc("&7实体类型: &f" + npc.getEntityTypeName()));
+            }
             lore.add(PhilosNPCPlugin.cc("&7姿势: &f" + npc.getPose().displayName()));
             lore.add(PhilosNPCPlugin.cc("&7大小: &f" + String.format("%.1f", npc.getScale())));
             meta.setLore(lore);
-            // 尝试设置头颅主人
-            if (npc.getOwnerName() != null) {
+            // 设置头颅主人
+            if (npc.isSystem() && npc.getEntityTypeName() != null && npc.getEntityTypeName().startsWith("PLAYER:")) {
+                String playerName = npc.getEntityTypeName().substring(7);
+                meta.setOwner(playerName);
+            } else if (npc.getOwnerName() != null) {
                 meta.setOwner(npc.getOwnerName());
             }
             head.setItemMeta(meta);

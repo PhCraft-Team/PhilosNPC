@@ -1,10 +1,8 @@
 package com.phcraft.philosnpc;
 
-import com.phcraft.philosnpc.features.FeatureGuiFactory;
 import com.phcraft.philosnpc.gui.GuiManager;
 import com.phcraft.philosnpc.npc.PhilosNPC;
-import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -16,9 +14,7 @@ public class NPCListener implements Listener {
 
     @EventHandler
     public void onEntityInteract(PlayerInteractEntityEvent event) {
-        if (!(event.getRightClicked() instanceof ArmorStand stand)) return;
-
-        var pdc = stand.getPersistentDataContainer();
+        var pdc = event.getRightClicked().getPersistentDataContainer();
         if (!pdc.has(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING)) return;
 
         event.setCancelled(true);
@@ -30,7 +26,10 @@ public class NPCListener implements Listener {
 
         GuiManager gui = PhilosNPCPlugin.instance().guiManager();
 
-        if (npc.getOwnerUuid().equals(player.getUniqueId()) && player.isSneaking()) {
+        boolean isOwner = npc.getOwnerUuid().equals(player.getUniqueId());
+        boolean isAdmin = player.hasPermission("philosnpc.admin");
+
+        if ((isOwner || isAdmin) && player.isSneaking()) {
             gui.openMainGui(player, npc);
         } else {
             if (npc.getFeatures().isEmpty()) {
