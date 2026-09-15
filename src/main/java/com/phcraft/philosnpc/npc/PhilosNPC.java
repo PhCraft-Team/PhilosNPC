@@ -1,0 +1,313 @@
+package com.phcraft.philosnpc.npc;
+
+import com.phcraft.philosnpc.PhilosNPCPlugin;
+import com.phcraft.philosnpc.features.ShopTrade;
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.inventory.ItemStack;
+
+import java.util.*;
+
+public class PhilosNPC {
+
+    private String id;
+    private String ownerName;
+    private UUID ownerUuid;
+    private Location location;
+    private NPCPose pose;
+    private double scale;
+    private List<FeatureType> features;
+    private String displayName;
+    private ItemStack[] equipment; // 5格: 头盔, 胸甲, 护腿, 靴子, 主手
+
+    // 商店相关
+    private ItemStack[] shopInventory; // 36格共享商店背包
+    private List<ShopTrade> trades;
+
+    // 传送相关
+    private Location teleportTarget;
+    private String teleportRewardCmd;
+
+    // 点歌相关
+    private ItemStack[] jukeboxDiscs; // 9格唱片栏
+
+    // 留言相关
+    private String message;
+
+    private long createdAt;
+
+    public PhilosNPC(String ownerName, UUID ownerUuid, Location location) {
+        this.id = UUID.randomUUID().toString();
+        this.ownerName = ownerName;
+        this.ownerUuid = ownerUuid;
+        this.location = location;
+        this.pose = NPCPose.STANDING;
+        this.scale = 1.0;
+        this.features = new ArrayList<>();
+        this.displayName = ownerName;
+        this.equipment = new ItemStack[5];
+        this.shopInventory = new ItemStack[36];
+        this.trades = new ArrayList<>();
+        this.teleportTarget = null;
+        this.teleportRewardCmd = null;
+        this.jukeboxDiscs = new ItemStack[9];
+        this.message = "";
+        this.createdAt = System.currentTimeMillis();
+    }
+
+    public PhilosNPC() {
+        this.features = new ArrayList<>();
+        this.equipment = new ItemStack[5];
+        this.shopInventory = new ItemStack[36];
+        this.trades = new ArrayList<>();
+        this.jukeboxDiscs = new ItemStack[9];
+        this.message = "";
+        this.createdAt = System.currentTimeMillis();
+    }
+
+    // ===== Getters & Setters =====
+
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
+
+    public String getOwnerName() { return ownerName; }
+    public void setOwnerName(String ownerName) { this.ownerName = ownerName; }
+
+    public UUID getOwnerUuid() { return ownerUuid; }
+    public void setOwnerUuid(UUID ownerUuid) { this.ownerUuid = ownerUuid; }
+
+    public Location getLocation() { return location; }
+    public void setLocation(Location location) { this.location = location; }
+
+    public NPCPose getPose() { return pose; }
+    public void setPose(NPCPose pose) { this.pose = pose; }
+
+    public double getScale() { return scale; }
+    public void setScale(double scale) { this.scale = scale; }
+
+    public List<FeatureType> getFeatures() { return features; }
+    public void setFeatures(List<FeatureType> features) { this.features = features; }
+
+    public String getDisplayName() { return displayName; }
+    public void setDisplayName(String displayName) { this.displayName = displayName; }
+
+    public ItemStack[] getEquipment() { return equipment; }
+    public void setEquipment(ItemStack[] equipment) { this.equipment = equipment; }
+
+    public ItemStack[] getShopInventory() { return shopInventory; }
+    public void setShopInventory(ItemStack[] shopInventory) { this.shopInventory = shopInventory; }
+
+    public List<ShopTrade> getTrades() { return trades; }
+    public void setTrades(List<ShopTrade> trades) { this.trades = trades; }
+
+    public Location getTeleportTarget() { return teleportTarget; }
+    public void setTeleportTarget(Location teleportTarget) { this.teleportTarget = teleportTarget; }
+
+    public String getTeleportRewardCmd() { return teleportRewardCmd; }
+    public void setTeleportRewardCmd(String teleportRewardCmd) { this.teleportRewardCmd = teleportRewardCmd; }
+
+    public ItemStack[] getJukeboxDiscs() { return jukeboxDiscs; }
+    public void setJukeboxDiscs(ItemStack[] jukeboxDiscs) { this.jukeboxDiscs = jukeboxDiscs; }
+
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
+
+    public long getCreatedAt() { return createdAt; }
+    public void setCreatedAt(long createdAt) { this.createdAt = createdAt; }
+
+    // ===== Feature 管理 =====
+
+    public boolean addFeature(FeatureType feature) {
+        if (features.size() >= PhilosNPCPlugin.MAX_FEATURES) {
+            return false;
+        }
+        if (features.contains(feature)) {
+            return false;
+        }
+        features.add(feature);
+        return true;
+    }
+
+    public boolean removeFeature(FeatureType feature) {
+        return features.remove(feature);
+    }
+
+    public boolean hasFeature(FeatureType feature) {
+        return features.contains(feature);
+    }
+
+    // ===== 序列化 / 反序列化 =====
+
+    public Map<String, Object> toMap() {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("id", id);
+        map.put("ownerName", ownerName);
+        map.put("ownerUuid", ownerUuid.toString());
+        map.put("location", serializeLocation(location));
+        map.put("pose", pose.name());
+        map.put("scale", scale);
+
+        List<String> featureNames = new ArrayList<>();
+        for (FeatureType f : features) {
+            featureNames.add(f.name());
+        }
+        map.put("features", featureNames);
+
+        map.put("displayName", displayName);
+
+        // equipment
+        List<Map<String, Object>> equipmentList = new ArrayList<>();
+        for (ItemStack item : equipment) {
+            if (item != null) {
+                equipmentList.add(item.serialize());
+            } else {
+                equipmentList.add(null);
+            }
+        }
+        map.put("equipment", equipmentList);
+
+        // shopInventory
+        List<Map<String, Object>> shopInvList = new ArrayList<>();
+        for (ItemStack item : shopInventory) {
+            if (item != null) {
+                shopInvList.add(item.serialize());
+            } else {
+                shopInvList.add(null);
+            }
+        }
+        map.put("shopInventory", shopInvList);
+
+        // trades
+        List<Map<String, Object>> tradesList = new ArrayList<>();
+        for (ShopTrade trade : trades) {
+            tradesList.add(trade.toMap());
+        }
+        map.put("trades", tradesList);
+
+        // teleportTarget
+        if (teleportTarget != null) {
+            map.put("teleportTarget", serializeLocation(teleportTarget));
+        }
+        if (teleportRewardCmd != null && !teleportRewardCmd.isEmpty()) {
+            map.put("teleportRewardCmd", teleportRewardCmd);
+        }
+
+        // jukeboxDiscs
+        List<Map<String, Object>> jukeboxList = new ArrayList<>();
+        for (ItemStack item : jukeboxDiscs) {
+            if (item != null) {
+                jukeboxList.add(item.serialize());
+            } else {
+                jukeboxList.add(null);
+            }
+        }
+        map.put("jukeboxDiscs", jukeboxList);
+
+        map.put("message", message);
+        map.put("createdAt", createdAt);
+
+        return map;
+    }
+
+    @SuppressWarnings("unchecked")
+    public static PhilosNPC fromMap(Map<String, Object> map) {
+        PhilosNPC npc = new PhilosNPC();
+
+        npc.id = (String) map.get("id");
+        npc.ownerName = (String) map.get("ownerName");
+        npc.ownerUuid = UUID.fromString((String) map.get("ownerUuid"));
+        npc.location = deserializeLocation((Map<String, Object>) map.get("location"));
+        npc.pose = NPCPose.valueOf((String) map.get("pose"));
+        npc.scale = ((Number) map.get("scale")).doubleValue();
+
+        List<String> featureNames = (List<String>) map.get("features");
+        if (featureNames != null) {
+            for (String name : featureNames) {
+                npc.features.add(FeatureType.valueOf(name));
+            }
+        }
+
+        npc.displayName = (String) map.getOrDefault("displayName", npc.ownerName);
+
+        // equipment
+        List<Map<String, Object>> equipmentList = (List<Map<String, Object>>) map.get("equipment");
+        if (equipmentList != null) {
+            npc.equipment = new ItemStack[5];
+            for (int i = 0; i < 5 && i < equipmentList.size(); i++) {
+                Map<String, Object> itemMap = equipmentList.get(i);
+                if (itemMap != null) {
+                    npc.equipment[i] = ItemStack.deserialize(itemMap);
+                }
+            }
+        }
+
+        // shopInventory
+        List<Map<String, Object>> shopInvList = (List<Map<String, Object>>) map.get("shopInventory");
+        if (shopInvList != null) {
+            npc.shopInventory = new ItemStack[36];
+            for (int i = 0; i < 36 && i < shopInvList.size(); i++) {
+                Map<String, Object> itemMap = shopInvList.get(i);
+                if (itemMap != null) {
+                    npc.shopInventory[i] = ItemStack.deserialize(itemMap);
+                }
+            }
+        }
+
+        // trades
+        List<Map<String, Object>> tradesList = (List<Map<String, Object>>) map.get("trades");
+        if (tradesList != null) {
+            for (Map<String, Object> tradeMap : tradesList) {
+                npc.trades.add(ShopTrade.fromMap(tradeMap));
+            }
+        }
+
+        // teleportTarget
+        if (map.containsKey("teleportTarget")) {
+            npc.teleportTarget = deserializeLocation((Map<String, Object>) map.get("teleportTarget"));
+        }
+        npc.teleportRewardCmd = (String) map.get("teleportRewardCmd");
+
+        // jukeboxDiscs
+        List<Map<String, Object>> jukeboxList = (List<Map<String, Object>>) map.get("jukeboxDiscs");
+        if (jukeboxList != null) {
+            npc.jukeboxDiscs = new ItemStack[9];
+            for (int i = 0; i < 9 && i < jukeboxList.size(); i++) {
+                Map<String, Object> itemMap = jukeboxList.get(i);
+                if (itemMap != null) {
+                    npc.jukeboxDiscs[i] = ItemStack.deserialize(itemMap);
+                }
+            }
+        }
+
+        npc.message = (String) map.getOrDefault("message", "");
+        npc.createdAt = map.containsKey("createdAt") ? ((Number) map.get("createdAt")).longValue() : System.currentTimeMillis();
+
+        return npc;
+    }
+
+    // ===== Location 序列化辅助 =====
+
+    private static Map<String, Object> serializeLocation(Location loc) {
+        if (loc == null) return null;
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("world", loc.getWorld().getName());
+        map.put("x", loc.getX());
+        map.put("y", loc.getY());
+        map.put("z", loc.getZ());
+        map.put("yaw", (double) loc.getYaw());
+        map.put("pitch", (double) loc.getPitch());
+        return map;
+    }
+
+    private static Location deserializeLocation(Map<String, Object> map) {
+        if (map == null) return null;
+        World world = Bukkit.getWorld((String) map.get("world"));
+        double x = ((Number) map.get("x")).doubleValue();
+        double y = ((Number) map.get("y")).doubleValue();
+        double z = ((Number) map.get("z")).doubleValue();
+        float yaw = ((Number) map.get("yaw")).floatValue();
+        float pitch = ((Number) map.get("pitch")).floatValue();
+        return new Location(world, x, y, z, yaw, pitch);
+    }
+}
