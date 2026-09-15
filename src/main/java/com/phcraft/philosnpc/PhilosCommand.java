@@ -4,14 +4,10 @@ import com.phcraft.philosnpc.gui.GuiManager;
 import com.phcraft.philosnpc.npc.NPCManager;
 import com.phcraft.philosnpc.npc.PhilosNPC;
 import net.milkbowl.vault.economy.EconomyResponse;
-import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
-
-import java.util.List;
 
 public class PhilosCommand implements CommandExecutor {
 
@@ -22,14 +18,15 @@ public class PhilosCommand implements CommandExecutor {
             return true;
         }
 
-        if (args.length == 0) {
-            sendHelp(player, label);
-            return true;
-        }
-
         var plugin = PhilosNPCPlugin.instance();
         NPCManager mgr = plugin.npcManager();
         GuiManager gui = plugin.guiManager();
+
+        // 无参数：打开NPC列表
+        if (args.length == 0) {
+            gui.openNPCListGui(player, 0);
+            return true;
+        }
 
         switch (args[0].toLowerCase()) {
             case "create" -> {
@@ -74,24 +71,15 @@ public class PhilosCommand implements CommandExecutor {
                 }
             }
             case "list" -> {
-                List<PhilosNPC> npcs = mgr.getNPCsByOwner(player.getUniqueId());
-                if (npcs.isEmpty()) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&7你还没有创建任何NPC"));
+                // 打开NPC列表GUI
+                gui.openNPCListGui(player, 0);
+            }
+            case "syslist" -> {
+                if (!player.hasPermission("philosnpc.admin")) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c只有管理员可以查看系统NPC列表"));
                     return true;
                 }
-                player.sendMessage(PhilosNPCPlugin.cc("&b&l=== 你的NPC ==="));
-                for (PhilosNPC npc : npcs) {
-                    String shortId = npc.getId().substring(0, 8);
-                    String world = npc.getLocation() != null && npc.getLocation().getWorld() != null
-                            ? npc.getLocation().getWorld().getName() : "unknown";
-                    int x = npc.getLocation() != null ? npc.getLocation().getBlockX() : 0;
-                    int y = npc.getLocation() != null ? npc.getLocation().getBlockY() : 0;
-                    int z = npc.getLocation() != null ? npc.getLocation().getBlockZ() : 0;
-                    player.sendMessage(PhilosNPCPlugin.cc(String.format(
-                            "&b%s &7| &f%s &7| &7%s @ %d,%d,%d &7| 功能: %d/4",
-                            shortId, npc.getDisplayName(), world, x, y, z, npc.getFeatures().size())));
-                }
-                player.sendMessage(PhilosNPCPlugin.cc("&7/" + label + " edit <id> 编辑"));
+                gui.openNPCListGui(player, 0, true);
             }
             case "edit" -> {
                 if (args.length < 2) {
@@ -187,7 +175,10 @@ public class PhilosCommand implements CommandExecutor {
                 plugin.npcManager().loadAll();
                 player.sendMessage(PhilosNPCPlugin.cc("&a已重载"));
             }
-            default -> sendHelp(player, label);
+            default -> {
+                // 未知子命令：打开NPC列表
+                gui.openNPCListGui(player, 0);
+            }
         }
         return true;
     }
@@ -197,20 +188,5 @@ public class PhilosCommand implements CommandExecutor {
             if (npc.getId().startsWith(shortId)) return npc;
         }
         return null;
-    }
-
-    private void sendHelp(Player player, String label) {
-        player.sendMessage(PhilosNPCPlugin.cc("&b&l===== PhilosNPC 帮助 ====="));
-        player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " create &7- 创建NPC (" + PhilosNPCPlugin.CREATE_COST + "金币)"));
-        player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " list &7- NPC列表"));
-        player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " edit <id> &7- 编辑NPC"));
-        player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " move <id> &7- 移动NPC"));
-        player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " delete <id> &7- 删除NPC"));
-        player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " tp <id> &7- 传送至NPC (" + PhilosNPCPlugin.TP_TO_NPC_COST + "金币)"));
-        if (player.hasPermission("philosnpc.admin")) {
-            player.sendMessage(PhilosNPCPlugin.cc("&d/" + label + " syscreate <类型> &7- 创建系统NPC（管理员）"));
-            player.sendMessage(PhilosNPCPlugin.cc("&d  &7类型: ZOMBIE/SKELETON/CREEPER/PLAYER:玩家名"));
-            player.sendMessage(PhilosNPCPlugin.cc("&b/" + label + " reload &7- 重载配置（管理员）"));
-        }
     }
 }

@@ -57,6 +57,15 @@ public class NPCGui {
                 "&7左键点击删除NPC"
         ));
 
+        // slot 23: 装备编辑 (DIAMOND_CHESTPLATE)
+        inv.setItem(23, createItem(
+                Material.DIAMOND_CHESTPLATE,
+                "&a装备编辑",
+                "&7修改NPC的装备外观",
+                "&7头盔/胸甲/护腿/靴子/主手",
+                "&7左键点击编辑装备"
+        ));
+
         // slot 24: 传送至NPC (ENDER_PEARL) - 花费10元
         inv.setItem(24, createItem(
                 Material.ENDER_PEARL,
@@ -100,6 +109,107 @@ public class NPCGui {
 
         // 填充空白玻璃
         fillEmptySlots(inv, 54);
+
+        return inv;
+    }
+
+    // ===== 装备编辑界面 =====
+
+    public static Inventory equipmentGui(PhilosNPC npc) {
+        String typePrefix = npc.isSystem() ? "&d&l" : "&b&l";
+        Inventory inv = Bukkit.createInventory(null, 45,
+                PhilosNPCPlugin.cc(typePrefix + "装备编辑 - " + npc.getDisplayName()));
+
+        ItemStack[] equipment = npc.getEquipment();
+
+        // 布局参考村民/铁砧：左侧垂直排列装备槽
+        // slot 10: 头盔
+        // slot 19: 胸甲
+        // slot 28: 护腿
+        // slot 37: 靴子
+        // slot 24: 主手
+
+        // 头盔槽
+        if (equipment[0] != null && equipment[0].getType() != Material.AIR) {
+            inv.setItem(10, equipment[0].clone());
+        } else {
+            inv.setItem(10, createItem(
+                    Material.GRAY_STAINED_GLASS_PANE,
+                    "&7头盔槽",
+                    "&7放入头盔或头颅物品"
+            ));
+        }
+
+        // 胸甲槽
+        if (equipment[1] != null && equipment[1].getType() != Material.AIR) {
+            inv.setItem(19, equipment[1].clone());
+        } else {
+            inv.setItem(19, createItem(
+                    Material.GRAY_STAINED_GLASS_PANE,
+                    "&7胸甲槽",
+                    "&7放入胸甲物品"
+            ));
+        }
+
+        // 护腿槽
+        if (equipment[2] != null && equipment[2].getType() != Material.AIR) {
+            inv.setItem(28, equipment[2].clone());
+        } else {
+            inv.setItem(28, createItem(
+                    Material.GRAY_STAINED_GLASS_PANE,
+                    "&7护腿槽",
+                    "&7放入护腿物品"
+            ));
+        }
+
+        // 靴子槽
+        if (equipment[3] != null && equipment[3].getType() != Material.AIR) {
+            inv.setItem(37, equipment[3].clone());
+        } else {
+            inv.setItem(37, createItem(
+                    Material.GRAY_STAINED_GLASS_PANE,
+                    "&7靴子槽",
+                    "&7放入靴子物品"
+            ));
+        }
+
+        // 主手槽（右侧）
+        if (equipment[4] != null && equipment[4].getType() != Material.AIR) {
+            inv.setItem(24, equipment[4].clone());
+        } else {
+            inv.setItem(24, createItem(
+                    Material.GRAY_STAINED_GLASS_PANE,
+                    "&7主手槽",
+                    "&7放入手持物品"
+            ));
+        }
+
+        // 说明牌
+        inv.setItem(16, createItem(
+                Material.BOOK,
+                "&b使用说明",
+                "&7将物品拖入对应槽位",
+                "&7点击保存后实时更新NPC外观",
+                "&7取出槽位物品可清空装备"
+        ));
+
+        // slot 40: 保存按钮
+        inv.setItem(40, createItem(
+                Material.EMERALD_BLOCK,
+                "&a&l保存并关闭",
+                "&7保存装备并更新NPC外观",
+                "&e左键点击保存"
+        ));
+
+        // slot 36: 返回按钮
+        inv.setItem(36, createItem(
+                Material.ARROW,
+                "&a返回",
+                "&7左键点击返回主界面"
+        ));
+
+        // 填充空白玻璃
+        fillEmptySlots(inv, 45);
 
         return inv;
     }
@@ -222,6 +332,74 @@ public class NPCGui {
         return inv;
     }
 
+    // ===== NPC列表界面 =====
+
+    public static Inventory npcListGui(List<PhilosNPC> npcs, int page, int totalPages, boolean isSystemList) {
+        String title = isSystemList
+                ? "&d&l系统NPC列表 - 第" + (page + 1) + "/" + totalPages + "页"
+                : "&b&l我的NPC - 第" + (page + 1) + "/" + totalPages + "页";
+
+        Inventory inv = Bukkit.createInventory(null, 54, PhilosNPCPlugin.cc(title));
+
+        int perPage = 28;
+        int start = page * perPage;
+        int end = Math.min(start + perPage, npcs.size());
+
+        // NPC槽位：第1-4行，左右各留1列边距，共4行x7列=28个
+        int slot = 10; // 从第2行第2列开始
+        int count = 0;
+
+        for (int i = start; i < end; i++) {
+            PhilosNPC npc = npcs.get(i);
+            if (count >= 28) break;
+
+            // 跳过边缘列
+            while (slot % 9 == 0 || slot % 9 == 8) {
+                slot++;
+            }
+            // 超过第5行（slot 44+）也停止
+            if (slot > 43) break;
+
+            ItemStack head = createNPCListHead(npc);
+            inv.setItem(slot, head);
+            slot++;
+            count++;
+        }
+
+        // 上一页
+        if (page > 0) {
+            inv.setItem(45, createItem(Material.ARROW, "&a上一页", "&7第 " + page + " 页"));
+        } else {
+            inv.setItem(45, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
+        }
+
+        // 总数/页码信息
+        inv.setItem(49, createItem(
+                Material.BOOK,
+                "&b总数: &f" + npcs.size() + " &7个",
+                "&7第 &f" + (page + 1) + "&7 / &f" + totalPages + " &7页"
+        ));
+
+        // 下一页
+        if (page < totalPages - 1) {
+            inv.setItem(53, createItem(Material.ARROW, "&a下一页", "&7第 " + (page + 2) + " 页"));
+        } else {
+            inv.setItem(53, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
+        }
+
+        // 关闭按钮
+        inv.setItem(50, createItem(
+                Material.BARRIER,
+                "&c关闭",
+                "&7左键点击关闭"
+        ));
+
+        // 填充空白
+        fillEmptySlots(inv, 54);
+
+        return inv;
+    }
+
     // ===== 辅助方法 =====
 
     private static ItemStack createItem(Material material, String name, String... loreLines) {
@@ -261,6 +439,39 @@ public class NPCGui {
             if (npc.isSystem() && npc.getEntityTypeName() != null && npc.getEntityTypeName().startsWith("PLAYER:")) {
                 String playerName = npc.getEntityTypeName().substring(7);
                 meta.setOwner(playerName);
+            } else if (npc.getOwnerName() != null) {
+                meta.setOwner(npc.getOwnerName());
+            }
+            head.setItemMeta(meta);
+        }
+        return head;
+    }
+
+    private static ItemStack createNPCListHead(PhilosNPC npc) {
+        ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+        SkullMeta meta = (SkullMeta) head.getItemMeta();
+        if (meta != null) {
+            String color = npc.isSystem() ? "&d" : "&b";
+            meta.setDisplayName(PhilosNPCPlugin.cc(color + npc.getDisplayName()));
+            List<String> lore = new ArrayList<>();
+            lore.add(PhilosNPCPlugin.cc("&7类型: &f" + npc.getNpcType().displayName()));
+            lore.add(PhilosNPCPlugin.cc("&7ID: &f" + npc.getId().substring(0, 8)));
+            lore.add(PhilosNPCPlugin.cc("&7姿势: &f" + npc.getPose().displayName()));
+            lore.add(PhilosNPCPlugin.cc("&7功能: &f" + npc.getFeatures().size() + "/4"));
+
+            if (npc.getLocation() != null && npc.getLocation().getWorld() != null) {
+                lore.add(PhilosNPCPlugin.cc("&7位置: &f" + npc.getLocation().getWorld().getName()
+                        + " " + npc.getLocation().getBlockX()
+                        + "," + npc.getLocation().getBlockY()
+                        + "," + npc.getLocation().getBlockZ()));
+            }
+
+            lore.add(PhilosNPCPlugin.cc("&e左键点击编辑"));
+            meta.setLore(lore);
+
+            // 设置头颅皮肤
+            if (npc.isSystem() && npc.getEntityTypeName() != null && npc.getEntityTypeName().startsWith("PLAYER:")) {
+                meta.setOwner(npc.getEntityTypeName().substring(7));
             } else if (npc.getOwnerName() != null) {
                 meta.setOwner(npc.getOwnerName());
             }
