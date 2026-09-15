@@ -3,7 +3,6 @@ package com.phcraft.philosnpc.features;
 import com.phcraft.philosnpc.PhilosNPCPlugin;
 import com.phcraft.philosnpc.npc.PhilosNPC;
 import net.milkbowl.vault.economy.EconomyResponse;
-import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 
@@ -28,7 +27,7 @@ public class TeleportFeature {
 
     /**
      * 执行传送
-     * 扣除5元（固定价格，给系统），传送到目标点，执行奖励命令
+     * 扣除费用（给系统），传送到目标点
      * @param player 玩家
      * @param npc NPC对象
      * @return 是否传送成功
@@ -38,7 +37,7 @@ public class TeleportFeature {
 
         Location target = npc.getTeleportTarget();
         if (target == null) {
-            player.sendMessage(PhilosNPCPlugin.cc("&c该NPC尚未设置传送目标点"));
+            player.sendMessage(PhilosNPCPlugin.cc("&c未设置传送目标点"));
             return false;
         }
 
@@ -49,7 +48,7 @@ public class TeleportFeature {
             EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, cost);
             if (!resp.transactionSuccess()) {
                 player.sendMessage(PhilosNPCPlugin.cc(
-                        "&c金币不足！传送需要 " + cost + " 金币"));
+                        "&c金币不足，传送需要 " + cost + " 金币"));
                 return false;
             }
         }
@@ -57,14 +56,7 @@ public class TeleportFeature {
         // 执行传送
         player.teleport(target);
         player.sendMessage(PhilosNPCPlugin.cc(
-                "&a已传送，花费" + cost + "金币"));
-
-        // 执行奖励命令
-        String rewardCmd = npc.getTeleportRewardCmd();
-        if (rewardCmd != null && !rewardCmd.isEmpty()) {
-            String cmd = rewardCmd.replace("{player}", player.getName());
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
-        }
+                "&a已传送，花费 " + cost + " 金币"));
 
         return true;
     }

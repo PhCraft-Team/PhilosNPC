@@ -1,6 +1,7 @@
 package com.phcraft.philosnpc.features;
 
 import com.phcraft.philosnpc.PhilosNPCPlugin;
+import com.phcraft.philosnpc.gui.GuiManager;
 import com.phcraft.philosnpc.npc.FeatureType;
 import com.phcraft.philosnpc.npc.PhilosNPC;
 import org.bukkit.Bukkit;
@@ -8,6 +9,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
@@ -28,8 +30,8 @@ public class FeatureGuiFactory {
      * @param npc NPC对象
      * @return 传送设置Inventory
      */
-    public static Inventory teleportSettingsGui(PhilosNPC npc) {
-        Inventory inv = Bukkit.createInventory(null, 36,
+    public static Inventory teleportSettingsGui(PhilosNPC npc, InventoryHolder holder) {
+        Inventory inv = Bukkit.createInventory(holder, 36,
                 PhilosNPCPlugin.cc("&b&l传送设置 - " + npc.getDisplayName()));
 
         // slot 13: 当前目标点信息 (COMPASS)
@@ -63,36 +65,15 @@ public class FeatureGuiFactory {
                 "&e左键点击设置"
         ));
 
-        // slot 21: 奖励命令设置 (COMMAND_BLOCK)
-        String rewardCmd = npc.getTeleportRewardCmd();
-        if (rewardCmd != null && !rewardCmd.isEmpty()) {
-            inv.setItem(21, createItem(
-                    Material.COMMAND_BLOCK,
-                    "&a奖励命令",
-                    "&7当前命令: &f" + rewardCmd,
-                    "&7可用占位符: &b{player}",
-                    "&e左键点击修改"
-            ));
-        } else {
-            inv.setItem(21, createItem(
-                    Material.COMMAND_BLOCK,
-                    "&a奖励命令",
-                    "&7当前: &c未设置",
-                    "&7传送成功后执行的命令",
-                    "&7可用占位符: &b{player}",
-                    "&e左键点击设置"
-            ));
-        }
-
         // slot 22: 价格显示
         if (npc.isSystem()) {
             // 系统NPC：管理员可自定义价格
             double cost = npc.getEffectiveTeleportCost();
             inv.setItem(22, createItem(
                     Material.GOLD_INGOT,
-                    npc.getCustomTeleportCost() >= 0 ? "&6传送价格（可自定义）" : "&7传送价格",
+                    npc.getCustomTeleportCost() >= 0 ? "&6传送价格" : "&7传送价格",
                     "&f" + cost + " 金币",
-                    npc.getCustomTeleportCost() >= 0 ? "&7管理员已自定义价格" : "&7默认价格",
+                    npc.getCustomTeleportCost() >= 0 ? "&7已自定义价格" : "&7默认价格",
                     "&e左键点击修改价格"
             ));
         } else {
@@ -100,7 +81,7 @@ public class FeatureGuiFactory {
                     Material.GOLD_INGOT,
                     "&7传送价格",
                     "&f" + TeleportFeature.getTeleportCost() + " 金币",
-                    "&7（固定价格，不可修改）"
+                    "&7固定价格，不可修改"
             ));
         }
 
@@ -132,8 +113,8 @@ public class FeatureGuiFactory {
      * @param npc NPC对象
      * @return 点歌台编辑Inventory
      */
-    public static Inventory jukeboxEditGui(PhilosNPC npc) {
-        Inventory inv = Bukkit.createInventory(null, 36,
+    public static Inventory jukeboxEditGui(PhilosNPC npc, InventoryHolder holder) {
+        Inventory inv = Bukkit.createInventory(holder, 36,
                 PhilosNPCPlugin.cc("&b&l点歌台编辑 - " + npc.getDisplayName()));
 
         // slot 9-17 (9个格子): 唱片槽位，直接放jukeboxDiscs数组
@@ -142,12 +123,12 @@ public class FeatureGuiFactory {
             if (discs[i] != null && discs[i].getType() != Material.AIR) {
                 inv.setItem(9 + i, discs[i].clone());
             } else {
-                inv.setItem(9 + i, createItem(
+                inv.setItem(9 + i, GuiManager.markPlaceholder(createItem(
                         Material.GRAY_STAINED_GLASS_PANE,
                         "&7唱片槽位 " + (i + 1),
                         "&7空槽位",
                         "&e放入唱片以供玩家点歌"
-                ));
+                )));
             }
         }
 
@@ -188,8 +169,8 @@ public class FeatureGuiFactory {
      * @param npc NPC对象
      * @return 留言编辑Inventory
      */
-    public static Inventory messageEditGui(PhilosNPC npc) {
-        Inventory inv = Bukkit.createInventory(null, 27,
+    public static Inventory messageEditGui(PhilosNPC npc, InventoryHolder holder) {
+        Inventory inv = Bukkit.createInventory(holder, 27,
                 PhilosNPCPlugin.cc("&b&l留言编辑 - " + npc.getDisplayName()));
 
         String message = npc.getMessage();
@@ -263,8 +244,8 @@ public class FeatureGuiFactory {
      * @param customer 顾客玩家
      * @return 功能选择Inventory
      */
-    public static Inventory customerFeatureGui(PhilosNPC npc, Player customer) {
-        Inventory inv = Bukkit.createInventory(null, 27,
+    public static Inventory customerFeatureGui(PhilosNPC npc, Player customer, InventoryHolder holder) {
+        Inventory inv = Bukkit.createInventory(holder, 27,
                 PhilosNPCPlugin.cc("&b&l" + npc.getDisplayName()));
 
         List<FeatureType> features = npc.getFeatures();

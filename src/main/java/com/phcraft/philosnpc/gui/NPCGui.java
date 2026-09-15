@@ -7,6 +7,7 @@ import com.phcraft.philosnpc.npc.PhilosNPC;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
@@ -18,9 +19,9 @@ public class NPCGui {
 
     // ===== 主界面 =====
 
-    public static Inventory mainGui(PhilosNPC npc) {
+    public static Inventory mainGui(PhilosNPC npc, InventoryHolder holder) {
         String typePrefix = npc.isSystem() ? "&d&l" : "&b&l";
-        Inventory inv = Bukkit.createInventory(null, 54,
+        Inventory inv = Bukkit.createInventory(holder, 54,
                 PhilosNPCPlugin.cc(typePrefix + "NPC管理 - " + npc.getDisplayName()));
 
         inv.setItem(13, createNPCHead(npc));
@@ -115,9 +116,9 @@ public class NPCGui {
 
     // ===== 装备编辑界面 =====
 
-    public static Inventory equipmentGui(PhilosNPC npc) {
+    public static Inventory equipmentGui(PhilosNPC npc, InventoryHolder holder) {
         String typePrefix = npc.isSystem() ? "&d&l" : "&b&l";
-        Inventory inv = Bukkit.createInventory(null, 45,
+        Inventory inv = Bukkit.createInventory(holder, 45,
                 PhilosNPCPlugin.cc(typePrefix + "装备编辑 - " + npc.getDisplayName()));
 
         ItemStack[] equipment = npc.getEquipment();
@@ -133,55 +134,55 @@ public class NPCGui {
         if (equipment[0] != null && equipment[0].getType() != Material.AIR) {
             inv.setItem(10, equipment[0].clone());
         } else {
-            inv.setItem(10, createItem(
+            inv.setItem(10, GuiManager.markPlaceholder(createItem(
                     Material.GRAY_STAINED_GLASS_PANE,
                     "&7头盔槽",
                     "&7放入头盔或头颅物品"
-            ));
+            )));
         }
 
         // 胸甲槽
         if (equipment[1] != null && equipment[1].getType() != Material.AIR) {
             inv.setItem(19, equipment[1].clone());
         } else {
-            inv.setItem(19, createItem(
+            inv.setItem(19, GuiManager.markPlaceholder(createItem(
                     Material.GRAY_STAINED_GLASS_PANE,
                     "&7胸甲槽",
                     "&7放入胸甲物品"
-            ));
+            )));
         }
 
         // 护腿槽
         if (equipment[2] != null && equipment[2].getType() != Material.AIR) {
             inv.setItem(28, equipment[2].clone());
         } else {
-            inv.setItem(28, createItem(
+            inv.setItem(28, GuiManager.markPlaceholder(createItem(
                     Material.GRAY_STAINED_GLASS_PANE,
                     "&7护腿槽",
                     "&7放入护腿物品"
-            ));
+            )));
         }
 
         // 靴子槽
         if (equipment[3] != null && equipment[3].getType() != Material.AIR) {
             inv.setItem(37, equipment[3].clone());
         } else {
-            inv.setItem(37, createItem(
+            inv.setItem(37, GuiManager.markPlaceholder(createItem(
                     Material.GRAY_STAINED_GLASS_PANE,
                     "&7靴子槽",
                     "&7放入靴子物品"
-            ));
+            )));
         }
 
         // 主手槽（右侧）
         if (equipment[4] != null && equipment[4].getType() != Material.AIR) {
             inv.setItem(24, equipment[4].clone());
         } else {
-            inv.setItem(24, createItem(
+            inv.setItem(24, GuiManager.markPlaceholder(createItem(
                     Material.GRAY_STAINED_GLASS_PANE,
                     "&7主手槽",
                     "&7放入手持物品"
-            ));
+            )));
         }
 
         // 说明牌
@@ -216,8 +217,8 @@ public class NPCGui {
 
     // ===== 功能选择界面 =====
 
-    public static Inventory featureSelectGui(PhilosNPC npc) {
-        Inventory inv = Bukkit.createInventory(null, 27, PhilosNPCPlugin.cc("&b&l选择功能 - " + npc.getDisplayName()));
+    public static Inventory featureSelectGui(PhilosNPC npc, InventoryHolder holder) {
+        Inventory inv = Bukkit.createInventory(holder, 27, PhilosNPCPlugin.cc("&b&l选择功能 - " + npc.getDisplayName()));
 
         FeatureType[] features = FeatureType.values();
         int[] slots = {10, 12, 14, 16};
@@ -246,8 +247,8 @@ public class NPCGui {
 
     // ===== 姿势选择界面 =====
 
-    public static Inventory poseSelectGui(PhilosNPC npc) {
-        Inventory inv = Bukkit.createInventory(null, 27, PhilosNPCPlugin.cc("&b&l选择姿势 - " + npc.getDisplayName()));
+    public static Inventory poseSelectGui(PhilosNPC npc, InventoryHolder holder) {
+        Inventory inv = Bukkit.createInventory(holder, 27, PhilosNPCPlugin.cc("&b&l选择姿势 - " + npc.getDisplayName()));
 
         NPCPose[] poses = NPCPose.values();
         int startSlot = 9; // slot 9-13
@@ -289,8 +290,8 @@ public class NPCGui {
 
     // ===== 大小调整界面 =====
 
-    public static Inventory sizeAdjustGui(PhilosNPC npc) {
-        Inventory inv = Bukkit.createInventory(null, 27, PhilosNPCPlugin.cc("&b&l调整大小 - " + npc.getDisplayName()));
+    public static Inventory sizeAdjustGui(PhilosNPC npc, InventoryHolder holder) {
+        Inventory inv = Bukkit.createInventory(holder, 27, PhilosNPCPlugin.cc("&b&l调整大小 - " + npc.getDisplayName()));
 
         double scale = npc.getScale();
 
@@ -334,12 +335,12 @@ public class NPCGui {
 
     // ===== NPC列表界面 =====
 
-    public static Inventory npcListGui(List<PhilosNPC> npcs, int page, int totalPages, boolean isSystemList) {
+    public static Inventory npcListGui(List<PhilosNPC> npcs, int page, int totalPages, boolean isSystemList, InventoryHolder holder) {
         String title = isSystemList
                 ? "&d&l系统NPC列表 - 第" + (page + 1) + "/" + totalPages + "页"
                 : "&b&l我的NPC - 第" + (page + 1) + "/" + totalPages + "页";
 
-        Inventory inv = Bukkit.createInventory(null, 54, PhilosNPCPlugin.cc(title));
+        Inventory inv = Bukkit.createInventory(holder, 54, PhilosNPCPlugin.cc(title));
 
         int perPage = 28;
         int start = page * perPage;
