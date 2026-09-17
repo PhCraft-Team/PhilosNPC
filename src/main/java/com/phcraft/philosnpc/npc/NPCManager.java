@@ -38,6 +38,15 @@ public class NPCManager {
     private final Map<Integer, String> entityIdMap;
     private final Map<UUID, ItemStack[]> sharedShopInventories;
     private final File dataFile;
+    // 村民式头部动画状态（entityId -> 状态）
+    private final Map<Integer, HeadState> headStates = new HashMap<>();
+    // 已生成NPC的实体引用（entityId -> 实体），供动画循环快速访问
+    private final Map<Integer, Entity> entityRefs = new HashMap<>();
+
+    private void registerEntity(Entity entity, String npcId) {
+        entityIdMap.put(entity.getEntityId(), npcId);
+        entityRefs.put(entity.getEntityId(), entity);
+    }
 
     // 默认皮革装备颜色（史蒂夫配色：蓝青色系）
     private static final Color DEFAULT_LEATHER_COLOR = Color.fromRGB(70, 130, 180); // 钢蓝色
@@ -418,7 +427,7 @@ public class NPCManager {
 
         NamespacedKey key = PhilosNPCPlugin.npcIdKey();
         entity.getPersistentDataContainer().set(key, PersistentDataType.STRING, npc.getId());
-        entityIdMap.put(entity.getEntityId(), npc.getId());
+        registerEntity(entity, npc.getId());
     }
 
     private void spawnSystemNPC(PhilosNPC npc, Location loc, World world) {
@@ -484,7 +493,7 @@ public class NPCManager {
             applyPose(entity, npc.getPose());
 
             entity.getPersistentDataContainer().set(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING, npc.getId());
-            entityIdMap.put(entity.getEntityId(), npc.getId());
+            registerEntity(entity, npc.getId());
         } else {
             // 生物型系统NPC：生成实际生物实体
             try {
@@ -522,7 +531,7 @@ public class NPCManager {
                 }
 
                 entity.getPersistentDataContainer().set(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING, npc.getId());
-                entityIdMap.put(entity.getEntityId(), npc.getId());
+                registerEntity(entity, npc.getId());
             } catch (IllegalArgumentException e) {
                 plugin.getLogger().warning("无法创建系统NPC，未知实体类型: " + typeName);
             }
@@ -552,6 +561,8 @@ public class NPCManager {
                         }
                     }
                 }
+                headStates.remove(entityId);
+                entityRefs.remove(entityId);
                 iterator.remove();
             }
         }
@@ -567,6 +578,8 @@ public class NPCManager {
             }
         }
         entityIdMap.clear();
+        headStates.clear();
+        entityRefs.clear();
     }
 
     // 重新生成指定区块内的NPC
@@ -604,27 +617,163 @@ public class NPCManager {
         }
     }
 
-    // ===== 头部动画 =====
+    // ===== 村民式头部动画 =====
 
+    /**
+     * 单个NPC的头部动画状态
+     */
+    private static class HeadState {
+        double basePitch;       // 姿势自带头部角度（弧度）
+        double baseYaw;
+        double baseRoll;
+        double yawOff = 0;      // 当前头部偏航偏移
+        double pitchOff = 0;    // 当前俯仰偏移
+        double targetYawOff = 0;
+        double targetPitchOff = 0;
+        int idleCooldown = 0;   // 闲置随机张望的间隔
+        long nextSense = 0;     // 下次感知玩家的tick
+    }
+
+    /**
+     * 启动村民式头部动画：
+     * - 附近有玩家时平滑转头看向玩家（含抬头低头）
+     * - 无玩家时偶尔随机张望
+     * - 头部偏转超过阈值时身体缓慢转向，像村民转身
+     */
     public void startHeadAnimation() {
         Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            for (World world : Bukkit.getWorlds()) {
-                for (Entity entity : world.getEntities()) {
-                    PersistentDataContainer pdc = entity.getPersistentDataContainer();
-                    if (!pdc.has(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING)) continue;
+            long tick = Bukkit.getCurrentTick();
+            for (Map.Entry<Integer, String> entry : entityIdMap.entrySet()) {
+                Entity entity = entityRefs.get(entry.getKey());
+                if (!(entity instanceof LivingEntity living) || !living.isValid()) continue;
+                PhilosNPC npc = npcs.get(entry.getValue());
+                if (npc == null) continue;
 
-                    if (entity instanceof LivingEntity living) {
-                        float currentYaw = living.getLocation().getYaw();
-                        float delta = (float) (Math.random() * 10.0 - 5.0);
-                        float newYaw = currentYaw + delta;
+                HeadState st = headStates.computeIfAbsent(entry.getKey(), k -> new HeadState());
+                // 姿势基础角可能与创建时不同（数据重载等），保持同步
+                double[] ha = poseHeadAngles(npc.getPose());
+                st.basePitch = Math.toRadians(ha[0]);
+                st.baseYaw = Math.toRadians(ha[1]);
+                st.baseRoll = Math.toRadians(ha[2]);
 
-                        Location loc = living.getLocation();
-                        loc.setYaw(newYaw);
-                        living.teleport(loc);
-                    }
+                if (tick >= st.nextSense) {
+                    st.nextSense = tick + 5;
+                    updateLookTarget(living, st);
+                }
+                animateHead(living, st);
+            }
+            // 清理已消失实体的状态
+            headStates.keySet().removeIf(id -> {
+                Entity e = entityRefs.get(id);
+                return e == null || !e.isValid();
+            });
+        }, 20L, 1L);
+    }
+
+    private final Random animRandom = new Random();
+
+    /**
+     * 更新注视目标：5格内最近玩家优先；否则进入闲置随机张望
+     */
+    private void updateLookTarget(LivingEntity living, HeadState st) {
+        Location eye = living.getEyeLocation();
+        Player nearest = null;
+        double best = 25.0; // 5格距离的平方
+
+        for (Entity nearby : living.getNearbyEntities(5, 4, 5)) {
+            if (nearby instanceof Player p && !p.isDead()
+                    && p.getGameMode() != org.bukkit.GameMode.SPECTATOR) {
+                double dist = p.getLocation().distanceSquared(eye);
+                if (dist < best) {
+                    best = dist;
+                    nearest = p;
                 }
             }
-        }, 20L, 20L);
+        }
+
+        if (nearest != null) {
+            org.bukkit.util.Vector toPlayer = nearest.getEyeLocation().toVector().subtract(eye.toVector());
+            double targetYaw = Math.toDegrees(Math.atan2(-toPlayer.getX(), toPlayer.getZ()));
+            double horizontal = Math.sqrt(toPlayer.getX() * toPlayer.getX() + toPlayer.getZ() * toPlayer.getZ());
+            double targetPitch = -Math.toDegrees(Math.atan2(toPlayer.getY(), horizontal));
+
+            double yawDiff = wrapDegrees(targetYaw - living.getLocation().getYaw());
+            st.targetYawOff = Math.toRadians(clamp(yawDiff, -75, 75));
+            st.targetPitchOff = Math.toRadians(clamp(targetPitch - Math.toDegrees(st.basePitch), -40, 40));
+        } else if (st.idleCooldown <= 0) {
+            // 闲置：3~8秒随机看一个方向
+            st.idleCooldown = 60 + animRandom.nextInt(140);
+            st.targetYawOff = (animRandom.nextDouble() - 0.5) * Math.toRadians(60);
+            st.targetPitchOff = (animRandom.nextDouble() - 0.5) * Math.toRadians(16);
+        }
+    }
+
+    /**
+     * 每tick插值执行转头；头部偏转过大时身体跟随转向
+     */
+    private void animateHead(LivingEntity living, HeadState st) {
+        if (st.idleCooldown > 0) st.idleCooldown--;
+
+        double maxStep = Math.toRadians(5.0); // 每tick最多5度，平滑转头
+        st.yawOff = approach(st.yawOff, st.targetYawOff, maxStep);
+        st.pitchOff = approach(st.pitchOff, st.targetPitchOff, maxStep * 0.8);
+
+        if (living instanceof ArmorStand stand) {
+            // 头偏超过55度时身体慢慢转过去，头相对回中
+            double yawOffDeg = Math.toDegrees(st.yawOff);
+            if (Math.abs(yawOffDeg) > 55) {
+                double turn = Math.signum(yawOffDeg) * 2.5;
+                living.setRotation((float) (living.getLocation().getYaw() + turn), 0);
+                st.yawOff = Math.toRadians(yawOffDeg - turn);
+            }
+            stand.setHeadPose(new EulerAngle(st.basePitch + st.pitchOff, st.baseYaw + st.yawOff, st.baseRoll));
+        } else {
+            // 非盔甲架生物NPC：头身一体，整体朝向插值转向玩家
+            double yawOffDeg = Math.toDegrees(st.targetYawOff);
+            if (Math.abs(yawOffDeg) > 1.0) {
+                double step = clamp(yawOffDeg, -4, 4);
+                living.setRotation((float) (living.getLocation().getYaw() + step), 0);
+                st.targetYawOff = Math.toRadians(yawOffDeg - step);
+                st.yawOff = st.targetYawOff;
+            }
+        }
+    }
+
+    private static double approach(double current, double target, double maxStep) {
+        double diff = target - current;
+        if (Math.abs(diff) <= maxStep) return target;
+        return current + Math.signum(diff) * maxStep;
+    }
+
+    private static double wrapDegrees(double angle) {
+        angle %= 360.0;
+        if (angle > 180.0) angle -= 360.0;
+        if (angle < -180.0) angle += 360.0;
+        return angle;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    /**
+     * 姿势自带的头部基础角度（度）：{pitch, yaw, roll}，与applyPose保持一致
+     */
+    private static double[] poseHeadAngles(NPCPose pose) {
+        switch (pose) {
+            case SNEAKING: return new double[]{25, 0, 0};
+            case LYING: return new double[]{20, 0, 0};
+            case DANCING: return new double[]{-12, 18, 0};
+            case WAVE: return new double[]{0, 0, 10};
+            case ARMS_CROSSED: return new double[]{-5, 10, 0};
+            case THUMBS_UP: return new double[]{10, -8, 0};
+            case BOWING: return new double[]{25, 0, 0};
+            case SUPERMAN: return new double[]{-20, 0, 0};
+            case POINTING: return new double[]{0, 12, 0};
+            case MEDITATION: return new double[]{18, 0, 0};
+            case FACEPALM: return new double[]{25, -8, 0};
+            default: return new double[]{0, 0, 0}; // STANDING, SITTING
+        }
     }
 
     // ===== 辅助方法 =====
@@ -633,11 +782,15 @@ public class NPCManager {
      * 应用姿势：通过盔甲架身体各部位的EulerAngle旋转实现视觉效果
      */
     private void applyPose(ArmorStand entity, NPCPose pose) {
+        // 头部基础角统一来自poseHeadAngles（村民式动画在其上叠加偏移）
+        double[] ha = poseHeadAngles(pose);
+        entity.setHeadPose(new EulerAngle(Math.toRadians(ha[0]), Math.toRadians(ha[1]), Math.toRadians(ha[2])));
+
         switch (pose) {
             case STANDING:
                 entity.setArms(true);
                 entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(EulerAngle.ZERO);
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-15), 0, Math.toRadians(10)));
                 entity.setLeftLegPose(EulerAngle.ZERO);
@@ -647,7 +800,7 @@ public class NPCManager {
                 // 身体前倾 + 头部低垂 + 弯腿
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(Math.toRadians(30), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(25), 0, 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-60), 0, Math.toRadians(-8)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-65), 0, Math.toRadians(8)));
                 entity.setLeftLegPose(new EulerAngle(Math.toRadians(55), 0, Math.toRadians(-4)));
@@ -657,7 +810,7 @@ public class NPCManager {
                 // 双腿前伸模拟坐姿
                 entity.setArms(true);
                 entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(EulerAngle.ZERO);
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-15), 0, Math.toRadians(10)));
                 entity.setLeftLegPose(new EulerAngle(Math.toRadians(-88), 0, Math.toRadians(12)));
@@ -667,7 +820,7 @@ public class NPCManager {
                 // 身体放平仰躺
                 entity.setArms(false);
                 entity.setBodyPose(new EulerAngle(Math.toRadians(90), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(20), 0, 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(15)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(-15)));
                 entity.setLeftLegPose(new EulerAngle(Math.toRadians(15), 0, Math.toRadians(3)));
@@ -677,7 +830,7 @@ public class NPCManager {
                 // 双臂高举 + 扭腰
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(0, 0, Math.toRadians(-8)));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(-12), Math.toRadians(18), 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(160), 0, Math.toRadians(35)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(160), 0, Math.toRadians(-35)));
                 entity.setLeftLegPose(new EulerAngle(0, 0, Math.toRadians(8)));
@@ -687,7 +840,7 @@ public class NPCManager {
                 // 右臂高举过头挥动
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(0, 0, Math.toRadians(-5)));
-                entity.setHeadPose(new EulerAngle(0, 0, Math.toRadians(10)));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(170), 0, Math.toRadians(30)));
                 entity.setLeftLegPose(EulerAngle.ZERO);
@@ -697,7 +850,7 @@ public class NPCManager {
                 // 双臂弯举交叉于胸前
                 entity.setArms(true);
                 entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(new EulerAngle(Math.toRadians(-5), Math.toRadians(10), 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-110), Math.toRadians(-25), Math.toRadians(-65)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-110), Math.toRadians(25), Math.toRadians(65)));
                 entity.setLeftLegPose(EulerAngle.ZERO);
@@ -707,7 +860,7 @@ public class NPCManager {
                 // 右臂弯举到胸前点赞
                 entity.setArms(true);
                 entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(new EulerAngle(Math.toRadians(10), Math.toRadians(-8), 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-120), Math.toRadians(-15), Math.toRadians(-30)));
                 entity.setLeftLegPose(EulerAngle.ZERO);
@@ -717,7 +870,7 @@ public class NPCManager {
                 // 身体前倾鞠躬
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(Math.toRadians(55), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(25), 0, 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(-6)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(6)));
                 entity.setLeftLegPose(EulerAngle.ZERO);
@@ -727,7 +880,7 @@ public class NPCManager {
                 // 身体前倾 + 双臂前伸
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(Math.toRadians(75), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(-20), 0, 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-170), 0, Math.toRadians(-8)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-170), 0, Math.toRadians(8)));
                 entity.setLeftLegPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(-4)));
@@ -737,7 +890,7 @@ public class NPCManager {
                 // 右臂前平举指向远方
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(0, Math.toRadians(-8), 0));
-                entity.setHeadPose(new EulerAngle(0, Math.toRadians(12), 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-90), 0, 0));
                 entity.setLeftLegPose(EulerAngle.ZERO);
@@ -747,7 +900,7 @@ public class NPCManager {
                 // 双腿叠起近似盘腿 + 双手搭膝 + 低头
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(Math.toRadians(5), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(18), 0, 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-40), 0, Math.toRadians(-25)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-40), 0, Math.toRadians(25)));
                 entity.setLeftLegPose(new EulerAngle(Math.toRadians(-85), 0, Math.toRadians(25)));
@@ -757,7 +910,7 @@ public class NPCManager {
                 // 右手扶额 + 低头驼背
                 entity.setArms(true);
                 entity.setBodyPose(new EulerAngle(Math.toRadians(8), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(25), Math.toRadians(-8), 0));
+
                 entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
                 entity.setRightArmPose(new EulerAngle(Math.toRadians(-150), Math.toRadians(-15), Math.toRadians(-25)));
                 entity.setLeftLegPose(EulerAngle.ZERO);
