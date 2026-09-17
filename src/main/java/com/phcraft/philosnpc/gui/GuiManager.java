@@ -428,9 +428,12 @@ public class GuiManager implements Listener {
                         player.sendMessage(PhilosNPCPlugin.cc("&c经济系统未启用"));
                         return;
                     }
+                    boolean isSystem = session.npc.isSystem();
+                    UUID ownerUuid = session.npc.getOwnerUuid();
+                    boolean selfPurchase = !isSystem && player.getUniqueId().equals(ownerUuid);
                     // 个人NPC：先检查共享商店背包库存
-                    if (!session.npc.isSystem()) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid());
+                    if (!isSystem) {
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid);
                         if (!hasEnoughInArray(shopInv, trade.getResult())) {
                             player.sendMessage(PhilosNPCPlugin.cc("&c商店库存不足"));
                             player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
@@ -444,11 +447,15 @@ public class GuiManager implements Listener {
                         player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
                         return;
                     }
+                    // 个人NPC：货款付给NPC主人（自购时钱不过手，净零流动）
+                    if (!isSystem && !selfPurchase && ownerUuid != null) {
+                        PhilosNPCPlugin.economy().depositPlayer(Bukkit.getOfflinePlayer(ownerUuid), price);
+                    }
                     // 个人NPC：从共享商店背包扣除产出
-                    if (!session.npc.isSystem()) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid());
+                    if (!isSystem) {
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid);
                         removeFromArray(shopInv, trade.getResult());
-                        npcManager.setSharedShopInventory(session.npc.getOwnerUuid(), shopInv);
+                        npcManager.setSharedShopInventory(ownerUuid, shopInv);
                     }
                     giveResult(player, trade.getResult().clone());
                     trade.incrementUses();
