@@ -61,9 +61,9 @@ public class ShopGui {
         return inv;
     }
 
-    // ===== 交易配方编辑界面（54格） =====
+    // ===== 交易配方编辑界面（54格，统一金币交易） =====
 
-    public static Inventory tradeEditGui(PhilosNPC npc, int page, boolean useCurrency, InventoryHolder holder) {
+    public static Inventory tradeEditGui(PhilosNPC npc, int page, InventoryHolder holder) {
         String title = npc.isSystem()
                 ? "&d&l系统NPC交易编辑 - 第" + (page + 1) + "页"
                 : "&b&l交易配方编辑 - 第" + (page + 1) + "页";
@@ -81,54 +81,48 @@ public class ShopGui {
             }
         }
 
-        // 第4行：物品输入槽（27/28/29）+ 添加按钮（30）+ 模式/说明（31）
-        boolean currencyMode = useCurrency && npc.isSystem();
-        if (currencyMode) {
-            inv.setItem(27, createItem(
-                    Material.GRAY_STAINED_GLASS_PANE,
-                    "&7金币模式",
-                    "&7无需放入价格物品",
-                    "&7价格在添加时于聊天框输入"
-            ));
-            inv.setItem(28, createItem(
-                    Material.GRAY_STAINED_GLASS_PANE,
-                    "&7金币模式",
-                    "&7无需放入价格物品2"
-            ));
-        } else {
-            inv.setItem(27, GuiManager.markPlaceholder(createItem(
-                    Material.PAPER,
-                    "&e价格物品1",
-                    "&7将价格物品1放入此槽位"
-            )));
-            inv.setItem(28, GuiManager.markPlaceholder(createItem(
-                    Material.PAPER,
-                    "&e价格物品2（可选）",
-                    "&7将价格物品2放入此槽位",
-                    "&7不需要则留空"
-            )));
-        }
+        // 第4行：产出物品槽（29）+ 添加按钮（30）+ 说明（31），价格统一为金币聊天输入
+        inv.setItem(27, GuiManager.markPlaceholder(createItem(
+                Material.GRAY_STAINED_GLASS_PANE,
+                "&7金币交易",
+                "&7价格无需放入物品",
+                "&7添加后在聊天框输入"
+        )));
+        inv.setItem(28, GuiManager.markPlaceholder(createItem(
+                Material.GRAY_STAINED_GLASS_PANE,
+                "&7金币交易",
+                "&7价格在聊天框输入"
+        )));
         inv.setItem(29, GuiManager.markPlaceholder(createItem(
                 Material.PAPER,
                 "&e产出物品槽位",
-                "&7将产出物品放入此槽位"
+                "&7将产出物品放入此槽位",
+                "&7点击添加后在聊天框输入价格"
         )));
 
         inv.setItem(30, createItem(
                 Material.EMERALD,
                 "&a&l点击添加交易",
-                "&7读取左侧三个槽位的物品",
-                "&7创建新的交易配方"
+                "&7读取左侧产出物品",
+                "&7然后在聊天框输入金币价格"
         ));
 
         if (npc.isSystem()) {
-            inv.setItem(31, modeToggleItem(useCurrency));
+            inv.setItem(31, createItem(
+                    Material.BOOK,
+                    "&b说明",
+                    "&7系统NPC交易统一使用金币结算",
+                    "&7添加交易：放入产出物品，",
+                    "&7点击添加，聊天框输入价格",
+                    "&7产出物品由系统直接生成"
+            ));
         } else {
             inv.setItem(31, createItem(
                     Material.BOOK,
                     "&b库存说明",
-                    "&7个人NPC出售的产出物品",
-                    "&7将从你的共享商店背包中扣除",
+                    "&7交易统一使用金币结算",
+                    "&7出售的产出物品将从你的",
+                    "&7共享商店背包中扣除",
                     "&7请在商店背包界面补充库存"
             ));
         }
@@ -169,20 +163,6 @@ public class ShopGui {
         }
 
         return inv;
-    }
-
-    /**
-     * 交易模式切换按钮（系统NPC）
-     */
-    public static ItemStack modeToggleItem(boolean useCurrency) {
-        return createItem(
-                useCurrency ? Material.GOLD_INGOT : Material.EMERALD,
-                useCurrency ? "&6当前模式: 金币交易" : "&a当前模式: 物物交换",
-                "&7金币交易: 只放产出物品，",
-                "&7价格在聊天框输入（自动扣金币）",
-                "&7物物交换: 价格物品 + 产出物品",
-                "&e左键点击切换模式"
-        );
     }
 
     // ===== 辅助方法 =====

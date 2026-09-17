@@ -75,6 +75,14 @@ public class NPCGui {
                 "&7左键点击传送"
         ));
 
+        // slot 28: 修改名字按钮 (NAME_TAG)
+        inv.setItem(28, createItem(
+                Material.NAME_TAG,
+                "&a修改名字",
+                "&7当前名字: &f" + npc.getDisplayName(),
+                "&7左键点击后在聊天框输入新名字"
+        ));
+
         // slot 31: "已启用功能" 标题 (BOOK)
         inv.setItem(31, createItem(
                 Material.BOOK,
@@ -251,23 +259,28 @@ public class NPCGui {
         Inventory inv = Bukkit.createInventory(holder, 27, PhilosNPCPlugin.cc("&b&l选择姿势 - " + npc.getDisplayName()));
 
         NPCPose[] poses = NPCPose.values();
-        int startSlot = 9; // slot 9-13
-
+        // 13种姿势：第2行 slot 10-16（7个），第3行 slot 19-25（6个）
         for (int i = 0; i < poses.length; i++) {
             NPCPose pose = poses[i];
             Material material = poseMaterial(pose);
             boolean isCurrent = npc.getPose() == pose;
 
+            int slot;
+            if (i < 7) {
+                slot = 10 + i;
+            } else {
+                slot = 19 + (i - 7);
+            }
+
             if (isCurrent) {
-                // 当前使用的高亮
-                inv.setItem(startSlot + i, createItem(
+                inv.setItem(slot, createItem(
                         material,
                         "&a&l" + pose.displayName() + " (当前)",
                         "&7" + pose.emoji(),
                         "&a左键点击选择此姿势"
                 ));
             } else {
-                inv.setItem(startSlot + i, createItem(
+                inv.setItem(slot, createItem(
                         material,
                         "&f" + pose.displayName(),
                         "&7" + pose.emoji(),
@@ -276,8 +289,8 @@ public class NPCGui {
             }
         }
 
-        // slot 18: 返回按钮
-        inv.setItem(18, createItem(
+        // slot 22: 返回按钮
+        inv.setItem(22, createItem(
                 Material.ARROW,
                 "&a返回",
                 "&7左键点击返回主界面"
@@ -526,6 +539,22 @@ public class NPCGui {
                 return Material.WHITE_BED;
             case DANCING:
                 return Material.JUKEBOX;
+            case WAVE:
+                return Material.FEATHER;
+            case ARMS_CROSSED:
+                return Material.SHIELD;
+            case THUMBS_UP:
+                return Material.EMERALD;
+            case BOWING:
+                return Material.BOW;
+            case SUPERMAN:
+                return Material.ELYTRA;
+            case POINTING:
+                return Material.SPYGLASS;
+            case MEDITATION:
+                return Material.AMETHYST_SHARD;
+            case FACEPALM:
+                return Material.PAPER;
             default:
                 return Material.STONE;
         }
