@@ -9,6 +9,8 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
@@ -23,6 +25,7 @@ import org.bukkit.inventory.meta.LeatherArmorMeta;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.util.EulerAngle;
 
 import java.io.File;
 import java.io.IOException;
@@ -301,12 +304,7 @@ public class NPCManager {
         entity.setArms(true);
         entity.setBasePlate(false);
 
-        try {
-            var method = entity.getClass().getMethod("setScale", float.class);
-            method.invoke(entity, (float) npc.getScale());
-        } catch (Exception ignored) {
-            if (npc.getScale() < 0.75) entity.setSmall(true);
-        }
+        applyScale(entity, npc.getScale());
 
         // 装备设置：确保头盔是玩家头颅
         EntityEquipment eq = entity.getEquipment();
@@ -387,12 +385,7 @@ public class NPCManager {
             entity.setArms(true);
             entity.setBasePlate(false);
 
-            try {
-                var method = entity.getClass().getMethod("setScale", float.class);
-                method.invoke(entity, (float) npc.getScale());
-            } catch (Exception ignored) {
-                if (npc.getScale() < 0.75) entity.setSmall(true);
-            }
+            applyScale(entity, npc.getScale());
 
             EntityEquipment eq = entity.getEquipment();
             if (eq != null) {
@@ -470,10 +463,7 @@ public class NPCManager {
                     }
 
                     // 设置大小
-                    try {
-                        var method = living.getClass().getMethod("setScale", float.class);
-                        method.invoke(living, (float) npc.getScale());
-                    } catch (Exception ignored) {}
+                    applyScale(living, npc.getScale());
                 }
 
                 entity.getPersistentDataContainer().set(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING, npc.getId());
@@ -584,33 +574,70 @@ public class NPCManager {
 
     // ===== 辅助方法 =====
 
+    /**
+     * 应用姿势：通过盔甲架身体各部位的EulerAngle旋转实现视觉效果
+     */
     private void applyPose(ArmorStand entity, NPCPose pose) {
         switch (pose) {
             case STANDING:
                 entity.setArms(true);
-                entity.setBasePlate(false);
-                entity.setSmall(false);
+                entity.setBodyPose(EulerAngle.ZERO);
+                entity.setHeadPose(EulerAngle.ZERO);
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-15), 0, Math.toRadians(10)));
+                entity.setLeftLegPose(EulerAngle.ZERO);
+                entity.setRightLegPose(EulerAngle.ZERO);
                 break;
             case SNEAKING:
+                // 身体前倾 + 头部低垂 + 弯腿
                 entity.setArms(true);
-                entity.setBasePlate(false);
-                entity.setSmall(false);
-                // 略微降低高度模拟潜行
+                entity.setBodyPose(new EulerAngle(Math.toRadians(30), 0, 0));
+                entity.setHeadPose(new EulerAngle(Math.toRadians(25), 0, 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-60), 0, Math.toRadians(-8)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-65), 0, Math.toRadians(8)));
+                entity.setLeftLegPose(new EulerAngle(Math.toRadians(55), 0, Math.toRadians(-4)));
+                entity.setRightLegPose(new EulerAngle(Math.toRadians(55), 0, Math.toRadians(4)));
                 break;
             case SITTING:
+                // 双腿前伸模拟坐姿
                 entity.setArms(true);
-                entity.setBasePlate(false);
-                // 坐姿可以通过调整身体位置实现
+                entity.setBodyPose(EulerAngle.ZERO);
+                entity.setHeadPose(EulerAngle.ZERO);
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-15), 0, Math.toRadians(10)));
+                entity.setLeftLegPose(new EulerAngle(Math.toRadians(-88), 0, Math.toRadians(12)));
+                entity.setRightLegPose(new EulerAngle(Math.toRadians(-88), 0, Math.toRadians(-12)));
                 break;
             case LYING:
+                // 身体放平仰躺
                 entity.setArms(false);
-                entity.setBasePlate(false);
-                // 躺卧
+                entity.setBodyPose(new EulerAngle(Math.toRadians(90), 0, 0));
+                entity.setHeadPose(new EulerAngle(Math.toRadians(20), 0, 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(15)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(-15)));
+                entity.setLeftLegPose(new EulerAngle(Math.toRadians(15), 0, Math.toRadians(3)));
+                entity.setRightLegPose(new EulerAngle(Math.toRadians(15), 0, Math.toRadians(-3)));
                 break;
             case DANCING:
+                // 双臂高举 + 扭腰
                 entity.setArms(true);
-                entity.setBasePlate(false);
+                entity.setBodyPose(new EulerAngle(0, 0, Math.toRadians(-8)));
+                entity.setHeadPose(new EulerAngle(Math.toRadians(-12), Math.toRadians(18), 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(160), 0, Math.toRadians(35)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(160), 0, Math.toRadians(-35)));
+                entity.setLeftLegPose(new EulerAngle(0, 0, Math.toRadians(8)));
+                entity.setRightLegPose(new EulerAngle(0, 0, Math.toRadians(-8)));
                 break;
+        }
+    }
+
+    /**
+     * 应用模型缩放：使用1.20.5+的SCALE属性（0.0625~16）
+     */
+    private void applyScale(LivingEntity entity, double scale) {
+        AttributeInstance attr = entity.getAttribute(Attribute.SCALE);
+        if (attr != null) {
+            attr.setBaseValue(Math.max(0.0625, Math.min(16.0, scale)));
         }
     }
 

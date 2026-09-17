@@ -175,9 +175,25 @@ public class PhilosCommand implements CommandExecutor {
                 plugin.npcManager().loadAll();
                 player.sendMessage(PhilosNPCPlugin.cc("&a已重载"));
             }
+            case "help" -> {
+                player.sendMessage(PhilosNPCPlugin.cc("&b&l===== PhilosNPC 帮助 ====="));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " &7- 打开我的NPC列表"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " create &7- 在当前位置创建个人NPC (需要 " + PhilosNPCPlugin.CREATE_COST + " 金币)"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " list &7- 打开我的NPC列表"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " edit <id> &7- 编辑指定NPC"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " move <id> &7- 将NPC移动到当前位置"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " delete <id> &7- 删除指定NPC"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " tp <id> &7- 传送到NPC (需要 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币)"));
+                if (player.hasPermission("philosnpc.admin")) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&b&l----- 管理员命令 -----"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syscreate <类型> &7- 创建系统NPC (如 ZOMBIE, PLAYER:Notch)"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syslist &7- 查看系统NPC列表"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " reload &7- 重载插件"));
+                }
+                player.sendMessage(PhilosNPCPlugin.cc("&b&l========================="));
+            }
             default -> {
-                // 未知子命令：打开NPC列表
-                gui.openNPCListGui(player, 0);
+                player.sendMessage(PhilosNPCPlugin.cc("&c未知子命令，输入 /" + label + " help 查看帮助"));
             }
         }
         return true;
