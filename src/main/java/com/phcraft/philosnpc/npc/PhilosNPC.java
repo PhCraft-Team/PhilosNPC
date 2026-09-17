@@ -35,7 +35,6 @@ public class PhilosNPC {
 
     // 传送相关
     private Location teleportTarget;
-    private String teleportRewardCmd;
 
     // 点歌相关
     private ItemStack[] jukeboxDiscs; // 9格唱片栏
@@ -58,7 +57,6 @@ public class PhilosNPC {
         this.shopInventory = new ItemStack[36];
         this.trades = new ArrayList<>();
         this.teleportTarget = null;
-        this.teleportRewardCmd = null;
         this.jukeboxDiscs = new ItemStack[9];
         this.message = "";
         this.createdAt = System.currentTimeMillis();
@@ -111,9 +109,6 @@ public class PhilosNPC {
 
     public Location getTeleportTarget() { return teleportTarget; }
     public void setTeleportTarget(Location teleportTarget) { this.teleportTarget = teleportTarget; }
-
-    public String getTeleportRewardCmd() { return teleportRewardCmd; }
-    public void setTeleportRewardCmd(String teleportRewardCmd) { this.teleportRewardCmd = teleportRewardCmd; }
 
     public ItemStack[] getJukeboxDiscs() { return jukeboxDiscs; }
     public void setJukeboxDiscs(ItemStack[] jukeboxDiscs) { this.jukeboxDiscs = jukeboxDiscs; }
@@ -212,9 +207,6 @@ public class PhilosNPC {
         if (teleportTarget != null) {
             map.put("teleportTarget", serializeLocation(teleportTarget));
         }
-        if (teleportRewardCmd != null && !teleportRewardCmd.isEmpty()) {
-            map.put("teleportRewardCmd", teleportRewardCmd);
-        }
 
         // jukeboxDiscs
         List<Map<String, Object>> jukeboxList = new ArrayList<>();
@@ -292,7 +284,6 @@ public class PhilosNPC {
         if (map.containsKey("teleportTarget")) {
             npc.teleportTarget = deserializeLocation((Map<String, Object>) map.get("teleportTarget"));
         }
-        npc.teleportRewardCmd = (String) map.get("teleportRewardCmd");
 
         // jukeboxDiscs
         List<Map<String, Object>> jukeboxList = (List<Map<String, Object>>) map.get("jukeboxDiscs");
