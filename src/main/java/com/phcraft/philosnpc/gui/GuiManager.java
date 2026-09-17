@@ -787,7 +787,9 @@ public class GuiManager implements Listener {
                 break;
             case 21: // 移动NPC
                 player.closeInventory();
-                player.sendMessage(PhilosNPCPlugin.cc("&a请走到目标位置，然后输入 /philosnpc move " + npc.getId()));
+                player.sendMessage(PhilosNPCPlugin.cc("&a走到目标位置，然后输入："));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/pnpc move " + npc.getId()));
+                player.sendMessage(PhilosNPCPlugin.cc("&7点击上方命令可直接复制"));
                 break;
             case 22: // 删除NPC
                 player.closeInventory();
@@ -803,7 +805,7 @@ public class GuiManager implements Listener {
                 break;
             case 28: // 修改名字
                 player.closeInventory();
-                player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入NPC的新名字（输入 &ccancel &a取消）："));
+                player.sendMessage(PhilosNPCPlugin.cc("&a在聊天输入新名字，输入 &ccancel &a取消"));
                 pendingRename.put(player.getUniqueId(), npc.getId());
                 break;
             case 31: // 已启用功能标题
@@ -938,14 +940,14 @@ public class GuiManager implements Listener {
 
         switch (slot) {
             case 11: // 缩小
-                if (currentScale > 0.5) {
-                    npc.setScale(Math.max(0.5, currentScale - 0.1));
+                if (currentScale > 0.2) {
+                    npc.setScale(Math.max(0.2, currentScale - 0.1));
                     changed = true;
                 }
                 break;
             case 15: // 放大
-                if (currentScale < 2.0) {
-                    npc.setScale(Math.min(2.0, currentScale + 0.1));
+                if (currentScale < 5.0) {
+                    npc.setScale(Math.min(5.0, currentScale + 0.1));
                     changed = true;
                 }
                 break;
@@ -1076,7 +1078,7 @@ public class GuiManager implements Listener {
         // 金币交易：返还样品并转入聊天输入价格（统一模式，个人/系统NPC一致）
         returnSampleItems(player, inv, 29);
         player.closeInventory();
-        player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入金币价格（输入 &ccancel &a取消）："));
+        player.sendMessage(PhilosNPCPlugin.cc("&a在聊天输入出售价格（金币数），输入 &ccancel &a取消"));
         pendingCurrencyResult.put(player.getUniqueId(), result);
         pendingCurrencyTrade.put(player.getUniqueId(), npc.getId());
     }
