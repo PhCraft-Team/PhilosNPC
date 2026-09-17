@@ -309,11 +309,11 @@ public class NPCGui {
         double scale = npc.getScale();
 
         // slot 11: 缩小按钮
-        boolean canShrink = scale > 0.5;
+        boolean canShrink = scale > 0.2;
         inv.setItem(11, createItem(
                 canShrink ? Material.REDSTONE_TORCH : Material.LEVER,
                 canShrink ? "&c缩小 (-0.1)" : "&7已达最小",
-                "&7最小: 0.5",
+                "&7最小: 0.2",
                 canShrink ? "&7左键点击缩小" : "&c无法继续缩小"
         ));
 
@@ -322,15 +322,15 @@ public class NPCGui {
                 Material.SLIME_BALL,
                 "&b当前大小",
                 "&f" + String.format("%.1f", scale),
-                "&7范围: 0.5 - 2.0"
+                "&7范围: 0.2 - 5.0"
         ));
 
         // slot 15: 放大按钮
-        boolean canGrow = scale < 2.0;
+        boolean canGrow = scale < 5.0;
         inv.setItem(15, createItem(
                 canGrow ? Material.GLOWSTONE_DUST : Material.LEVER,
                 canGrow ? "&a放大 (+0.1)" : "&7已达最大",
-                "&7最大: 2.0",
+                "&7最大: 5.0",
                 canGrow ? "&7左键点击放大" : "&c无法继续放大"
         ));
 
@@ -441,7 +441,7 @@ public class NPCGui {
             meta.setDisplayName(PhilosNPCPlugin.cc(color + npc.getDisplayName()));
             List<String> lore = new ArrayList<>();
             lore.add(PhilosNPCPlugin.cc("&7类型: &f" + npc.getNpcType().displayName()));
-            lore.add(PhilosNPCPlugin.cc("&7NPC ID: &f" + npc.getId().substring(0, 8) + "..."));
+            lore.add(PhilosNPCPlugin.cc("&7ID: &f" + displayId(npc.getId())));
             lore.add(PhilosNPCPlugin.cc("&7主人: &f" + npc.getOwnerName()));
             if (npc.isSystem() && npc.getEntityTypeName() != null) {
                 lore.add(PhilosNPCPlugin.cc("&7实体类型: &f" + npc.getEntityTypeName()));
@@ -469,7 +469,7 @@ public class NPCGui {
             meta.setDisplayName(PhilosNPCPlugin.cc(color + npc.getDisplayName()));
             List<String> lore = new ArrayList<>();
             lore.add(PhilosNPCPlugin.cc("&7类型: &f" + npc.getNpcType().displayName()));
-            lore.add(PhilosNPCPlugin.cc("&7ID: &f" + npc.getId().substring(0, 8)));
+            lore.add(PhilosNPCPlugin.cc("&7ID: &f" + displayId(npc.getId())));
             lore.add(PhilosNPCPlugin.cc("&7姿势: &f" + npc.getPose().displayName()));
             lore.add(PhilosNPCPlugin.cc("&7功能: &f" + npc.getFeatures().size() + "/4"));
 
@@ -558,6 +558,13 @@ public class NPCGui {
             default:
                 return Material.STONE;
         }
+    }
+
+    /**
+     * ID显示：短ID（如 Notch_1）完整显示，旧UUID截断前8位
+     */
+    private static String displayId(String id) {
+        return id.length() > 16 ? id.substring(0, 8) + "..." : id;
     }
 
     private static Material parseMaterial(String name, Material fallback) {

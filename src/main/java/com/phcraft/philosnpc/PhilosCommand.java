@@ -86,12 +86,9 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c用法: /" + label + " edit <id>"));
                     return true;
                 }
-                PhilosNPC npc = mgr.getNPC(args[1]);
+                PhilosNPC npc = mgr.findNPC(args[1]);
                 if (npc == null) {
-                    npc = findByShortId(mgr, args[1]);
-                }
-                if (npc == null) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&c找不到ID为 " + args[1] + " 的NPC"));
+                    player.sendMessage(PhilosNPCPlugin.cc(notFoundMsg(label, mgr, args[1])));
                     return true;
                 }
                 if (!npc.getOwnerUuid().equals(player.getUniqueId()) && !player.hasPermission("philosnpc.admin")) {
@@ -105,10 +102,9 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c用法: /" + label + " move <id>"));
                     return true;
                 }
-                PhilosNPC npc = mgr.getNPC(args[1]);
-                if (npc == null) npc = findByShortId(mgr, args[1]);
+                PhilosNPC npc = mgr.findNPC(args[1]);
                 if (npc == null) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&c找不到该NPC"));
+                    player.sendMessage(PhilosNPCPlugin.cc(notFoundMsg(label, mgr, args[1])));
                     return true;
                 }
                 if (!npc.getOwnerUuid().equals(player.getUniqueId()) && !player.hasPermission("philosnpc.admin")) {
@@ -119,17 +115,16 @@ public class PhilosCommand implements CommandExecutor {
                 npc.setLocation(player.getLocation());
                 mgr.spawnNPC(npc);
                 mgr.saveAll();
-                player.sendMessage(PhilosNPCPlugin.cc("&aNPC已移动到当前位置"));
+                player.sendMessage(PhilosNPCPlugin.cc("&aNPC已移到你脚下"));
             }
             case "delete" -> {
                 if (args.length < 2) {
                     player.sendMessage(PhilosNPCPlugin.cc("&c用法: /" + label + " delete <id>"));
                     return true;
                 }
-                PhilosNPC npc = mgr.getNPC(args[1]);
-                if (npc == null) npc = findByShortId(mgr, args[1]);
+                PhilosNPC npc = mgr.findNPC(args[1]);
                 if (npc == null) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&cNPC不存在"));
+                    player.sendMessage(PhilosNPCPlugin.cc(notFoundMsg(label, mgr, args[1])));
                     return true;
                 }
                 if (!npc.getOwnerUuid().equals(player.getUniqueId()) && !player.hasPermission("philosnpc.admin")) {
@@ -144,10 +139,9 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c用法: /" + label + " tp <id>"));
                     return true;
                 }
-                PhilosNPC npc = mgr.getNPC(args[1]);
-                if (npc == null) npc = findByShortId(mgr, args[1]);
+                PhilosNPC npc = mgr.findNPC(args[1]);
                 if (npc == null) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&c找不到该NPC"));
+                    player.sendMessage(PhilosNPCPlugin.cc(notFoundMsg(label, mgr, args[1])));
                     return true;
                 }
                 if (!npc.getOwnerUuid().equals(player.getUniqueId()) && !player.hasPermission("philosnpc.admin")) {
@@ -157,7 +151,7 @@ public class PhilosCommand implements CommandExecutor {
                 if (PhilosNPCPlugin.economy() != null) {
                     EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, PhilosNPCPlugin.TP_TO_NPC_COST);
                     if (!resp.transactionSuccess()) {
-                        player.sendMessage(PhilosNPCPlugin.cc("&c金币不足！传送需要 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
+                        player.sendMessage(PhilosNPCPlugin.cc("&c金币不够，传送需要 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
                         return true;
                     }
                 }
@@ -176,21 +170,20 @@ public class PhilosCommand implements CommandExecutor {
                 player.sendMessage(PhilosNPCPlugin.cc("&a已重载"));
             }
             case "help" -> {
-                player.sendMessage(PhilosNPCPlugin.cc("&b&l===== PhilosNPC 帮助 ====="));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " &7- 打开我的NPC列表"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " create &7- 在当前位置创建个人NPC (需要 " + PhilosNPCPlugin.CREATE_COST + " 金币)"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " list &7- 打开我的NPC列表"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " edit <id> &7- 编辑指定NPC"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " move <id> &7- 将NPC移动到当前位置"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " delete <id> &7- 删除指定NPC"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " tp <id> &7- 传送到NPC (需要 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币)"));
+                player.sendMessage(PhilosNPCPlugin.cc("&b&l===== PhilosNPC 命令 ====="));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " create &7在脚下创建NPC，花 " + PhilosNPCPlugin.CREATE_COST + " 金币"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " list &7打开我的NPC列表"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " edit <id> &7打开NPC编辑界面"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " move <id> &7把NPC移到你脚下"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " delete <id> &7删除NPC，不可恢复"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " tp <id> &7传送到NPC，花 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
+                player.sendMessage(PhilosNPCPlugin.cc("&7ID在列表和编辑界面可查，输入前几位即可匹配"));
                 if (player.hasPermission("philosnpc.admin")) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&b&l----- 管理员命令 -----"));
-                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syscreate <类型> &7- 创建系统NPC (如 ZOMBIE, PLAYER:Notch)"));
-                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syslist &7- 查看系统NPC列表"));
-                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " reload &7- 重载插件"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&b&l----- 管理员 -----"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syscreate <类型> &7创建系统NPC，如 ZOMBIE、PLAYER:Notch"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syslist &7查看系统NPC列表"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " reload &7重载插件"));
                 }
-                player.sendMessage(PhilosNPCPlugin.cc("&b&l========================="));
             }
             default -> {
                 player.sendMessage(PhilosNPCPlugin.cc("&c未知子命令，输入 /" + label + " help 查看帮助"));
@@ -199,10 +192,14 @@ public class PhilosCommand implements CommandExecutor {
         return true;
     }
 
-    private PhilosNPC findByShortId(NPCManager mgr, String shortId) {
-        for (PhilosNPC npc : mgr.getAllNPCs()) {
-            if (npc.getId().startsWith(shortId)) return npc;
+    /**
+     * ID找不到时的提示：多匹配提示歧义，无匹配引导查列表
+     */
+    private String notFoundMsg(String label, NPCManager mgr, String input) {
+        int matches = mgr.countNPCMatches(input);
+        if (matches > 1) {
+            return "&cID不唯一，匹配到 " + matches + " 个NPC，请输入完整ID";
         }
-        return null;
+        return "&c找不到NPC: &f" + input + "&c。输入 /" + label + " list 查看你的NPC";
     }
 }

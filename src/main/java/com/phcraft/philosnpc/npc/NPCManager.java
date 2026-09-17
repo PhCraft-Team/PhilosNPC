@@ -127,6 +127,8 @@ public class NPCManager {
         }
 
         PhilosNPC npc = new PhilosNPC(player.getName(), player.getUniqueId(), player.getLocation());
+        // 短ID：玩家名_递增数字（如 Notch_1），方便命令输入
+        npc.setId(generateShortId(player.getName(), false));
         npcs.put(npc.getId(), npc);
 
         // 设置默认装备：玩家皮肤头颅 + 皮革装备 + 主手物品
@@ -174,7 +176,7 @@ public class NPCManager {
         spawnNPC(npc);
         saveAll();
 
-        player.sendMessage(PhilosNPCPlugin.cc("&aNPC创建成功！花费 " + PhilosNPCPlugin.CREATE_COST + " 金币"));
+        player.sendMessage(PhilosNPCPlugin.cc("&a已创建NPC，ID: &f" + npc.getId() + "&a，花费 " + PhilosNPCPlugin.CREATE_COST + " 金币"));
         return npc;
     }
 
@@ -182,6 +184,7 @@ public class NPCManager {
         PhilosNPC npc = new PhilosNPC(admin.getName(), admin.getUniqueId(), admin.getLocation());
         npc.setNpcType(NPCType.SYSTEM);
         npc.setEntityTypeName(entityTypeName);
+        npc.setId(generateShortId(admin.getName(), true));
 
         // 解析显示名
         if (entityTypeName.startsWith("PLAYER:")) {
@@ -218,6 +221,58 @@ public class NPCManager {
 
     public PhilosNPC getNPC(String id) {
         return npcs.get(id);
+    }
+
+    /**
+     * 生成短ID：玩家名_递增数字（如 Notch_1、Notch_2），系统NPC为 sys_递增数字。
+     * 从现有同前缀ID中取最大编号+1，避免重复。
+     */
+    private String generateShortId(String ownerName, boolean system) {
+        String prefix = system ? "sys" : ownerName.replaceAll("[^a-zA-Z0-9_\\-\\u4e00-\\u9fa5]", "");
+        if (prefix.isEmpty()) prefix = "npc";
+        int max = 0;
+        for (String existingId : npcs.keySet()) {
+            if (existingId.startsWith(prefix + "_")) {
+                String suffix = existingId.substring(prefix.length() + 1);
+                try {
+                    max = Math.max(max, Integer.parseInt(suffix));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return prefix + "_" + (max + 1);
+    }
+
+    /**
+     * 按ID查找NPC：精确匹配 → 唯一前缀匹配（支持旧UUID输前几位）。
+     * 多个匹配时返回null并提示调用方歧义。
+     */
+    public PhilosNPC findNPC(String input) {
+        if (input == null || input.isBlank()) return null;
+        PhilosNPC exact = npcs.get(input);
+        if (exact != null) return exact;
+
+        List<PhilosNPC> matches = new ArrayList<>();
+        for (PhilosNPC npc : npcs.values()) {
+            if (npc.getId().startsWith(input)) {
+                matches.add(npc);
+            }
+        }
+        if (matches.size() == 1) return matches.get(0);
+        return null;
+    }
+
+    /**
+     * 前缀匹配到的NPC数量（用于歧义提示）
+     */
+    public int countNPCMatches(String input) {
+        if (input == null || input.isBlank()) return 0;
+        if (npcs.containsKey(input)) return 1;
+        int count = 0;
+        for (PhilosNPC npc : npcs.values()) {
+            if (npc.getId().startsWith(input)) count++;
+        }
+        return count;
     }
 
     public PhilosNPC getNPCByEntityId(int entityId) {
