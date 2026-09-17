@@ -355,7 +355,8 @@ public class NPCManager {
     }
 
     private void spawnPersonalNPC(PhilosNPC npc, Location loc, World world) {
-        ArmorStand entity = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
+        Location spawnLoc = loc.clone().add(0, poseYOffset(npc.getPose()), 0);
+        ArmorStand entity = (ArmorStand) world.spawnEntity(spawnLoc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
 
         entity.setCustomName(PhilosNPCPlugin.cc(npc.getDisplayName()));
         entity.setCustomNameVisible(true);
@@ -436,7 +437,8 @@ public class NPCManager {
         if (typeName.startsWith("PLAYER:")) {
             // 玩家型系统NPC：用ArmorStand + 指定玩家头颅 + 皮革身体
             String playerName = typeName.substring(7);
-            ArmorStand entity = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
+            Location spawnLoc = loc.clone().add(0, poseYOffset(npc.getPose()), 0);
+            ArmorStand entity = (ArmorStand) world.spawnEntity(spawnLoc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
 
             entity.setCustomName(PhilosNPCPlugin.cc(npc.getDisplayName()));
             entity.setCustomNameVisible(true);
@@ -757,12 +759,27 @@ public class NPCManager {
     }
 
     /**
+     * 姿势对应的生成高度偏移：弯腿/坐/躺时臀部应下降，盔甲架原点固定在腰部，
+     * 不补偿偏移就会浮空
+     */
+    private static double poseYOffset(NPCPose pose) {
+        switch (pose) {
+            case SNEAKING: return -0.2;
+            case SITTING: return -0.35;
+            case LYING: return -0.55;
+            case MEDITATION: return -0.3;
+            case SUPERMAN: return -0.3;
+            default: return 0;
+        }
+    }
+
+    /**
      * 姿势自带的头部基础角度（度）：{pitch, yaw, roll}，与applyPose保持一致
      */
     private static double[] poseHeadAngles(NPCPose pose) {
         switch (pose) {
             case SNEAKING: return new double[]{25, 0, 0};
-            case LYING: return new double[]{20, 0, 0};
+            case LYING: return new double[]{-10, 0, 0};
             case DANCING: return new double[]{-12, 18, 0};
             case WAVE: return new double[]{0, 0, 10};
             case ARMS_CROSSED: return new double[]{-5, 10, 0};
@@ -817,14 +834,14 @@ public class NPCManager {
                 entity.setRightLegPose(new EulerAngle(Math.toRadians(-88), 0, Math.toRadians(-12)));
                 break;
             case LYING:
-                // 身体放平仰躺
+                // 仰躺：身体后仰90度放平，腿沿身体延长线伸直（+90度补偿），手臂贴身两侧
                 entity.setArms(false);
-                entity.setBodyPose(new EulerAngle(Math.toRadians(90), 0, 0));
+                entity.setBodyPose(new EulerAngle(Math.toRadians(-90), 0, 0));
 
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(15)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(-15)));
-                entity.setLeftLegPose(new EulerAngle(Math.toRadians(15), 0, Math.toRadians(3)));
-                entity.setRightLegPose(new EulerAngle(Math.toRadians(15), 0, Math.toRadians(-3)));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(-6)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(6)));
+                entity.setLeftLegPose(new EulerAngle(Math.toRadians(88), 0, Math.toRadians(3)));
+                entity.setRightLegPose(new EulerAngle(Math.toRadians(88), 0, Math.toRadians(-3)));
                 break;
             case DANCING:
                 // 双臂高举 + 扭腰
