@@ -628,6 +628,86 @@ public class NPCManager {
                 entity.setLeftLegPose(new EulerAngle(0, 0, Math.toRadians(8)));
                 entity.setRightLegPose(new EulerAngle(0, 0, Math.toRadians(-8)));
                 break;
+            case WAVE:
+                // 右臂高举过头挥动
+                entity.setArms(true);
+                entity.setBodyPose(new EulerAngle(0, 0, Math.toRadians(-5)));
+                entity.setHeadPose(new EulerAngle(0, 0, Math.toRadians(10)));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(170), 0, Math.toRadians(30)));
+                entity.setLeftLegPose(EulerAngle.ZERO);
+                entity.setRightLegPose(EulerAngle.ZERO);
+                break;
+            case ARMS_CROSSED:
+                // 双臂弯举交叉于胸前
+                entity.setArms(true);
+                entity.setBodyPose(EulerAngle.ZERO);
+                entity.setHeadPose(new EulerAngle(Math.toRadians(-5), Math.toRadians(10), 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-110), Math.toRadians(-25), Math.toRadians(-65)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-110), Math.toRadians(25), Math.toRadians(65)));
+                entity.setLeftLegPose(EulerAngle.ZERO);
+                entity.setRightLegPose(EulerAngle.ZERO);
+                break;
+            case THUMBS_UP:
+                // 右臂弯举到胸前点赞
+                entity.setArms(true);
+                entity.setBodyPose(EulerAngle.ZERO);
+                entity.setHeadPose(new EulerAngle(Math.toRadians(10), Math.toRadians(-8), 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-120), Math.toRadians(-15), Math.toRadians(-30)));
+                entity.setLeftLegPose(EulerAngle.ZERO);
+                entity.setRightLegPose(EulerAngle.ZERO);
+                break;
+            case BOWING:
+                // 身体前倾鞠躬
+                entity.setArms(true);
+                entity.setBodyPose(new EulerAngle(Math.toRadians(55), 0, 0));
+                entity.setHeadPose(new EulerAngle(Math.toRadians(25), 0, 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(-6)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(6)));
+                entity.setLeftLegPose(EulerAngle.ZERO);
+                entity.setRightLegPose(EulerAngle.ZERO);
+                break;
+            case SUPERMAN:
+                // 身体前倾 + 双臂前伸
+                entity.setArms(true);
+                entity.setBodyPose(new EulerAngle(Math.toRadians(75), 0, 0));
+                entity.setHeadPose(new EulerAngle(Math.toRadians(-20), 0, 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-170), 0, Math.toRadians(-8)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-170), 0, Math.toRadians(8)));
+                entity.setLeftLegPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(-4)));
+                entity.setRightLegPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(4)));
+                break;
+            case POINTING:
+                // 右臂前平举指向远方
+                entity.setArms(true);
+                entity.setBodyPose(new EulerAngle(0, Math.toRadians(-8), 0));
+                entity.setHeadPose(new EulerAngle(0, Math.toRadians(12), 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-90), 0, 0));
+                entity.setLeftLegPose(EulerAngle.ZERO);
+                entity.setRightLegPose(EulerAngle.ZERO);
+                break;
+            case MEDITATION:
+                // 双腿叠起近似盘腿 + 双手搭膝 + 低头
+                entity.setArms(true);
+                entity.setBodyPose(new EulerAngle(Math.toRadians(5), 0, 0));
+                entity.setHeadPose(new EulerAngle(Math.toRadians(18), 0, 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-40), 0, Math.toRadians(-25)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-40), 0, Math.toRadians(25)));
+                entity.setLeftLegPose(new EulerAngle(Math.toRadians(-85), 0, Math.toRadians(25)));
+                entity.setRightLegPose(new EulerAngle(Math.toRadians(-85), 0, Math.toRadians(-25)));
+                break;
+            case FACEPALM:
+                // 右手扶额 + 低头驼背
+                entity.setArms(true);
+                entity.setBodyPose(new EulerAngle(Math.toRadians(8), 0, 0));
+                entity.setHeadPose(new EulerAngle(Math.toRadians(25), Math.toRadians(-8), 0));
+                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
+                entity.setRightArmPose(new EulerAngle(Math.toRadians(-150), Math.toRadians(-15), Math.toRadians(-25)));
+                entity.setLeftLegPose(EulerAngle.ZERO);
+                entity.setRightLegPose(EulerAngle.ZERO);
+                break;
         }
     }
 

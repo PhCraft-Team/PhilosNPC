@@ -770,6 +770,7 @@ public class GuiManager implements Listener {
         pendingTeleportCost.remove(uuid);
         pendingCurrencyTrade.remove(uuid);
         pendingCurrencyResult.remove(uuid);
+        pendingRename.remove(uuid);
     }
 
     // ===== 主界面点击处理 =====
@@ -799,6 +800,11 @@ public class GuiManager implements Listener {
                 break;
             case 24: // 传送至NPC
                 handleTeleportToNPC(player, npc);
+                break;
+            case 28: // 修改名字
+                player.closeInventory();
+                player.sendMessage(PhilosNPCPlugin.cc("&a请在聊天框输入NPC的新名字（输入 &ccancel &a取消）："));
+                pendingRename.put(player.getUniqueId(), npc.getId());
                 break;
             case 31: // 已启用功能标题
                 break;
@@ -893,14 +899,19 @@ public class GuiManager implements Listener {
     private void handlePoseSelectClick(Player player, PhilosNPC npc, int slot) {
         if (npc == null) return;
 
-        if (slot == 18) { // 返回按钮
+        if (slot == 22) { // 返回按钮
             openMainGui(player, npc);
             return;
         }
 
         NPCPose[] poses = NPCPose.values();
-        // 5种姿势，slot 9-13
-        int poseIndex = slot - 9;
+        // 13种姿势：第2行 slot 10-16（前7个），第3行 slot 19-25（后6个）
+        int poseIndex = -1;
+        if (slot >= 10 && slot <= 16) {
+            poseIndex = slot - 10;
+        } else if (slot >= 19 && slot <= 25) {
+            poseIndex = 7 + (slot - 19);
+        }
         if (poseIndex >= 0 && poseIndex < poses.length) {
             npc.setPose(poses[poseIndex]);
             npcManager.saveAll();
@@ -1281,6 +1292,7 @@ public class GuiManager implements Listener {
     private final Map<UUID, String> pendingTeleportCost = new HashMap<>();
     private final Map<UUID, String> pendingCurrencyTrade = new HashMap<>();
     private final Map<UUID, ItemStack> pendingCurrencyResult = new HashMap<>();
+    private final Map<UUID, String> pendingRename = new HashMap<>();
 
     @EventHandler
     public void onPlayerChat(org.bukkit.event.player.AsyncPlayerChatEvent event) {
@@ -1357,6 +1369,34 @@ public class GuiManager implements Listener {
                 } else {
                     player.sendMessage(PhilosNPCPlugin.cc("&a传送价格已设为: &6" + cost + " 金币"));
                 }
+            });
+            return;
+        }
+
+        if (pendingRename.containsKey(player.getUniqueId())) {
+            event.setCancelled(true);
+            String npcId = pendingRename.remove(player.getUniqueId());
+            var npc = npcManager.getNPC(npcId);
+            if (npc == null) return;
+
+            if (msg.equalsIgnoreCase("cancel")) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c已取消改名"));
+                return;
+            }
+            String name = msg.trim();
+            if (name.isEmpty() || name.length() > 32) {
+                pendingRename.put(player.getUniqueId(), npcId);
+                player.sendMessage(PhilosNPCPlugin.cc("&c名字长度需为1-32个字符，请重新输入（或输入cancel取消）"));
+                return;
+            }
+            // 异步线程不能修改NPC数据，回到主线程执行
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                npc.setDisplayName(name);
+                npcManager.saveAll();
+                // 重新生成NPC以更新头顶名字
+                npcManager.despawnNPC(npc);
+                npcManager.spawnNPC(npc);
+                player.sendMessage(PhilosNPCPlugin.cc("&a名字已修改为: &f" + name));
             });
             return;
         }
