@@ -1,5 +1,7 @@
 # PhilosNPC
 
+> Paper 26.3 预研分支：编译目标固定为 `26.3.build.19-alpha`，运行需 Java 25。产物仅供隔离测试，验证结果见 `PAPER_26_3.md`；暂不作为正式服升级依据。
+
 ![Java](https://img.shields.io/badge/Java-25-orange)
 ![Paper](https://img.shields.io/badge/Paper-1.21+-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -68,3 +70,16 @@
 ## 文档
 
 完整中文Wiki：https://github.com/PhCraft-Team/PhilosNPC/wiki
+
+## 构建和检查
+
+构建配置放在 `plugin.json`。提交 PR 后，GitHub Actions 会检查中文标题、运行构建和测试、核对 JAR 的名称与版本，并上传保留 7 天的构建包。
+
+本预研分支的 `releaseEnabled` 为 `false`，合并后也不会自动发布正式版。修改或升级依赖前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+本地检查：
+
+```bash
+python -X utf8 -m unittest discover -s .github/scripts -p 'test_*.py' -v
+gradle --no-daemon clean build
+```

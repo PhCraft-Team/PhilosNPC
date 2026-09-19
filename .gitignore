@@ -12,3 +12,8 @@ build/
 .classpath
 bin/
 *.log
+
+# Template build and Python cache
+out/
+__pycache__/
+*.pyc
