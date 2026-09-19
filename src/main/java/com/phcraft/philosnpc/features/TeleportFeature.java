@@ -43,21 +43,46 @@ public class TeleportFeature {
 
         double cost = npc.getEffectiveTeleportCost();
 
-        // 扣除费用
-        if (PhilosNPCPlugin.economy() != null && cost > 0) {
-            EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, cost);
-            if (!resp.transactionSuccess()) {
-                player.sendMessage(PhilosNPCPlugin.cc(
-                        "&c金币不足，传送需要 " + cost + " 金币"));
-                return false;
-            }
+        return teleport(player, target, cost);
+    }
+
+    public static boolean teleport(Player player, Location target, double cost) {
+        if (target == null || target.getWorld() == null || !Double.isFinite(cost) || cost < 0) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c传送目标或费用无效"));
+            return false;
         }
-
-        // 执行传送
-        player.teleport(target);
-        player.sendMessage(PhilosNPCPlugin.cc(
-                "&a已传送，花费 " + cost + " 金币"));
-
+        var economy = PhilosNPCPlugin.economy();
+        Payments.Result payment = Payments.transfer(economy, player, null, cost);
+        if (payment != Payments.Result.SUCCESS) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c传送付款未完成；若余额异常，请联系管理员核对。"));
+            if (payment == Payments.Result.UNCERTAIN) {
+                PhilosNPCPlugin.instance().getLogger().severe("传送付款结果未知：player="
+                        + player.getUniqueId() + ", cost=" + cost);
+            }
+            return false;
+        }
+        boolean teleported;
+        try {
+            teleported = player.teleport(target);
+        } catch (RuntimeException ex) {
+            teleported = false;
+        }
+        if (!teleported) {
+            boolean refunded = cost == 0;
+            if (cost > 0) {
+                try {
+                    EconomyResponse refund = economy.depositPlayer(player, cost);
+                    refunded = refund != null && refund.transactionSuccess();
+                } catch (RuntimeException ex) {
+                    // 禁止重试结果未知的退款。
+                }
+            }
+            player.sendMessage(PhilosNPCPlugin.cc(refunded ? "&c传送未成功，费用已退回。" : "&c传送未成功，退款异常，请联系管理员。"));
+            if (!refunded) PhilosNPCPlugin.instance().getLogger().severe("传送退款需核对：player="
+                    + player.getUniqueId() + ", cost=" + cost);
+            return false;
+        }
+        player.sendMessage(PhilosNPCPlugin.cc("&a已传送，花费 " + cost + " 金币"));
         return true;
     }
 

@@ -61,6 +61,7 @@ public class PhilosNPCPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (guiManager != null) guiManager.shutdown();
         if (npcManager != null) {
             npcManager.saveAll();
             npcManager.despawnAll();

@@ -7,11 +7,11 @@ import com.phcraft.philosnpc.features.MessageFeature;
 import com.phcraft.philosnpc.features.ShopGui;
 import com.phcraft.philosnpc.features.ShopTrade;
 import com.phcraft.philosnpc.features.TeleportFeature;
+import com.phcraft.philosnpc.features.Payments;
 import com.phcraft.philosnpc.npc.FeatureType;
 import com.phcraft.philosnpc.npc.NPCManager;
 import com.phcraft.philosnpc.npc.NPCPose;
 import com.phcraft.philosnpc.npc.PhilosNPC;
-import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -47,6 +47,8 @@ public class GuiManager implements Listener {
     private final NPCManager npcManager;
     // 记录玩家当前打开的村民交易NPC（含过滤后的交易列表，用于交易事件拦截）
     private final Map<UUID, MerchantSession> merchantSessions = new HashMap<>();
+
+    private final java.util.Set<UUID> uncertainPayments = new java.util.HashSet<>();
 
     // 装备编辑界面的可交互槽位
     private static final int[] EQUIPMENT_SLOTS = {10, 19, 28, 37, 24}; // 头盔, 胸甲, 护腿, 靴子, 主手
@@ -151,6 +153,12 @@ public class GuiManager implements Listener {
         if (npc.isSystem()) {
             openTradeEditGui(player, npc, 0);
         } else {
+            // 先提交当前窗口，再读取共享库存；同一店主只能有一个编辑窗口。
+            player.closeInventory();
+            if (isStockBeingEdited(npc.getOwnerUuid())) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c共享商店背包正在编辑，请稍后重试"));
+                return;
+            }
             GuiState state = new GuiState(GuiState.Screen.SHOP_EDIT, npc.getId(), 0, new HashMap<>());
             Inventory inv = ShopGui.shopInventoryGui(npc, state);
             state.setInventory(inv);
@@ -416,6 +424,18 @@ public class GuiManager implements Listener {
                 if (selected < 0 || selected >= session.trades.size()) return;
                 ShopTrade trade = session.trades.get(selected);
 
+                if (npcManager.getNPC(session.npc.getId()) != session.npc
+                        || !session.npc.getTrades().contains(trade)
+                        || (!session.npc.isSystem() && (session.npc.getOwnerUuid() == null
+                            || isStockBeingEdited(session.npc.getOwnerUuid())))) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c商店已变更或库存正在编辑，请稍后重新打开"));
+                    return;
+                }
+                if (uncertainPayments.contains(player.getUniqueId())) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c上次付款结果未知，请联系管理员核对；当前会话已暂停购买"));
+                    return;
+                }
+
                 if (!trade.canUse()) {
                     player.sendMessage(PhilosNPCPlugin.cc("&c此商品已售罄"));
                     player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
@@ -441,15 +461,16 @@ public class GuiManager implements Listener {
                         }
                     }
                     double price = trade.getCurrencyPrice();
-                    EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, price);
-                    if (!resp.transactionSuccess()) {
-                        player.sendMessage(PhilosNPCPlugin.cc("&c金币不足"));
-                        player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
+                    Payments.Result payment = Payments.transfer(PhilosNPCPlugin.economy(), player,
+                            isSystem ? null : Bukkit.getOfflinePlayer(ownerUuid), price);
+                    if (payment != Payments.Result.SUCCESS) {
+                        if (payment == Payments.Result.UNCERTAIN) {
+                            uncertainPayments.add(player.getUniqueId());
+                            plugin.getLogger().severe("商店付款结果未知，禁止重试：buyer=" + player.getUniqueId()
+                                    + ", owner=" + ownerUuid + ", price=" + price + ", npc=" + session.npc.getId());
+                        }
+                        player.sendMessage(PhilosNPCPlugin.cc("&c付款未完成；若余额异常，请联系管理员核对。"));
                         return;
-                    }
-                    // 个人NPC：货款付给NPC主人（自购时钱不过手，净零流动）
-                    if (!isSystem && !selfPurchase && ownerUuid != null) {
-                        PhilosNPCPlugin.economy().depositPlayer(Bukkit.getOfflinePlayer(ownerUuid), price);
                     }
                     // 个人NPC：从共享商店背包扣除产出
                     if (!isSystem) {
@@ -461,7 +482,7 @@ public class GuiManager implements Listener {
                     trade.incrementUses();
                     npcManager.saveAll();
                     player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_YES, 1f, 1f);
-                    player.sendMessage(PhilosNPCPlugin.cc("&a购买成功，花费 " + price + " 金币"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&a购买成功，花费 " + (selfPurchase ? 0 : price) + " 金币"));
                 } else {
                     // 物物交换（旧数据兼容）：校验商人槽位中的价格物品
                     if (!ingredientReady(mi.getItem(0), trade.getPrice1())
@@ -469,27 +490,33 @@ public class GuiManager implements Listener {
                         return; // 价格物品未放齐，静默忽略
                     }
 
-                    // 个人NPC：检查共享商店背包库存
+                    ItemStack[] updatedStock = null;
                     if (!session.npc.isSystem()) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid());
-                        if (!hasEnoughInArray(shopInv, trade.getResult())) {
+                        Inventory staged = Bukkit.createInventory(null, 36);
+                        ItemStack[] stock = npcManager.getSharedShopInventory(session.npc.getOwnerUuid());
+                        for (int i = 0; i < stock.length; i++) {
+                            staged.setItem(i, stock[i] == null ? null : stock[i].clone());
+                        }
+                        if (!staged.containsAtLeast(trade.getResult(), trade.getResult().getAmount())) {
                             player.sendMessage(PhilosNPCPlugin.cc("&c商店库存不足"));
-                            player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
                             return;
                         }
+                        staged.removeItem(trade.getResult().clone());
+                        for (ItemStack priceItem : new ItemStack[] {trade.getPrice1(), trade.getPrice2()}) {
+                            if (priceItem != null && !priceItem.getType().isAir()
+                                    && !staged.addItem(priceItem.clone()).isEmpty()) {
+                                player.sendMessage(PhilosNPCPlugin.cc("&c商店背包没有足够空间收取交换物品"));
+                                return;
+                            }
+                        }
+                        updatedStock = staged.getContents();
                     }
-
-                    // 给予产出（放不下则掉落脚下）
-                    giveResult(player, trade.getResult().clone());
-                    // 消耗价格物品（只扣所需数量）
                     consumeFromMerchantSlot(mi, 0, trade.getPrice1());
                     consumeFromMerchantSlot(mi, 1, trade.getPrice2());
-                    // 个人NPC：从共享商店背包扣除产出物品
-                    if (!session.npc.isSystem()) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid());
-                        removeFromArray(shopInv, trade.getResult());
-                        npcManager.setSharedShopInventory(session.npc.getOwnerUuid(), shopInv);
+                    if (updatedStock != null) {
+                        npcManager.setSharedShopInventory(session.npc.getOwnerUuid(), updatedStock);
                     }
+                    giveResult(player, trade.getResult().clone());
                     trade.incrementUses();
                     npcManager.saveAll();
                     player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_YES, 1f, 1f);
@@ -634,6 +661,29 @@ public class GuiManager implements Listener {
             item.setAmount(remaining);
             inv.setItem(slot, item);
         }
+    }
+
+    private boolean canEdit(Player player, PhilosNPC npc) {
+        return player.hasPermission("philosnpc.admin")
+                || !npc.isSystem() && player.getUniqueId().equals(npc.getOwnerUuid());
+    }
+
+    public void shutdown() {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getOpenInventory().getTopInventory().getHolder() instanceof GuiState
+                    || merchantSessions.containsKey(player.getUniqueId())) player.closeInventory();
+        }
+    }
+
+    private boolean isStockBeingEdited(UUID owner) {
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+            Inventory inv = viewer.getOpenInventory().getTopInventory();
+            if (inv.getSize() != 45 || !(inv.getHolder() instanceof GuiState state)
+                    || state.getScreen() != GuiState.Screen.SHOP_EDIT) continue;
+            PhilosNPC editing = npcManager.getNPC(state.getNpcId());
+            if (editing != null && java.util.Objects.equals(owner, editing.getOwnerUuid())) return true;
+        }
+        return false;
     }
 
     private boolean hasEnoughInArray(ItemStack[] items, ItemStack target) {
@@ -826,16 +876,9 @@ public class GuiManager implements Listener {
     }
 
     private void handleTeleportToNPC(Player player, PhilosNPC npc) {
-        if (PhilosNPCPlugin.economy() != null) {
-            EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, PhilosNPCPlugin.TP_TO_NPC_COST);
-            if (!resp.transactionSuccess()) {
-                player.sendMessage(PhilosNPCPlugin.cc("&c金币不足！传送需要 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
-                return;
-            }
+        if (TeleportFeature.teleport(player, npc.getLocation(), PhilosNPCPlugin.TP_TO_NPC_COST)) {
+            player.closeInventory();
         }
-        player.teleport(npc.getLocation());
-        player.sendMessage(PhilosNPCPlugin.cc("&a已传送到NPC，花费 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
-        player.closeInventory();
     }
 
     private void handleFeatureSlotClick(Player player, PhilosNPC npc, int featureIndex) {
@@ -1290,22 +1333,31 @@ public class GuiManager implements Listener {
 
     // ===== 聊天输入处理（留言、传送价格、金币交易价格） =====
 
-    private final Map<UUID, String> pendingMessage = new HashMap<>();
-    private final Map<UUID, String> pendingTeleportCost = new HashMap<>();
-    private final Map<UUID, String> pendingCurrencyTrade = new HashMap<>();
-    private final Map<UUID, ItemStack> pendingCurrencyResult = new HashMap<>();
-    private final Map<UUID, String> pendingRename = new HashMap<>();
+    private final Map<UUID, String> pendingMessage = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, String> pendingTeleportCost = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, String> pendingCurrencyTrade = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, ItemStack> pendingCurrencyResult = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<UUID, String> pendingRename = new java.util.concurrent.ConcurrentHashMap<>();
 
     @EventHandler
     public void onPlayerChat(org.bukkit.event.player.AsyncPlayerChatEvent event) {
         var player = event.getPlayer();
         String msg = event.getMessage();
 
+        UUID id = player.getUniqueId();
+        if (!(pendingCurrencyTrade.containsKey(id) || pendingTeleportCost.containsKey(id)
+                || pendingRename.containsKey(id) || pendingMessage.containsKey(id))) return;
+        event.setCancelled(true);
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (player.isOnline()) handleChatInput(player, msg);
+        });
+    }
+
+    private void handleChatInput(Player player, String msg) {
         if (pendingCurrencyTrade.containsKey(player.getUniqueId())) {
-            event.setCancelled(true);
             String npcId = pendingCurrencyTrade.remove(player.getUniqueId());
             var npc = npcManager.getNPC(npcId);
-            if (npc == null) {
+            if (npc == null || !canEdit(player, npc)) {
                 pendingCurrencyResult.remove(player.getUniqueId());
                 return;
             }
@@ -1324,7 +1376,7 @@ public class GuiManager implements Listener {
                 player.sendMessage(PhilosNPCPlugin.cc("&c无效的数字格式，请重新输入（或输入cancel取消）"));
                 return;
             }
-            if (price <= 0) {
+            if (!Double.isFinite(price) || price <= 0) {
                 pendingCurrencyTrade.put(player.getUniqueId(), npcId);
                 player.sendMessage(PhilosNPCPlugin.cc("&c价格需大于0，请重新输入（或输入cancel取消）"));
                 return;
@@ -1334,21 +1386,17 @@ public class GuiManager implements Listener {
                 player.sendMessage(PhilosNPCPlugin.cc("&c产出物品丢失，重新操作"));
                 return;
             }
-            // 异步线程不能修改NPC数据/打开GUI，回到主线程执行
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                npc.getTrades().add(new ShopTrade(result, price, -1));
-                npcManager.saveAll();
-                player.sendMessage(PhilosNPCPlugin.cc("&a金币交易已添加: &6" + price + " 金币"));
-                openTradeEditGui(player, npc, 0);
-            });
+            npc.getTrades().add(new ShopTrade(result, price, -1));
+            npcManager.saveAll();
+            player.sendMessage(PhilosNPCPlugin.cc("&a金币交易已添加: &6" + price + " 金币"));
+            openTradeEditGui(player, npc, 0);
             return;
         }
 
         if (pendingTeleportCost.containsKey(player.getUniqueId())) {
-            event.setCancelled(true);
             String npcId = pendingTeleportCost.remove(player.getUniqueId());
             var npc = npcManager.getNPC(npcId);
-            if (npc == null) return;
+            if (npc == null || !canEdit(player, npc)) return;
 
             if (msg.equalsIgnoreCase("cancel")) {
                 player.sendMessage(PhilosNPCPlugin.cc("&c已取消设置"));
@@ -1361,25 +1409,26 @@ public class GuiManager implements Listener {
                 player.sendMessage(PhilosNPCPlugin.cc("&c无效的数字格式"));
                 return;
             }
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                npc.setCustomTeleportCost(cost);
-                npcManager.saveAll();
-                if (cost < 0) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&a已恢复默认传送价格"));
-                } else if (cost == 0) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&a传送已设为免费"));
-                } else {
-                    player.sendMessage(PhilosNPCPlugin.cc("&a传送价格已设为: &6" + cost + " 金币"));
-                }
-            });
+            if (!Double.isFinite(cost)) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c传送价格必须是有限数字"));
+                return;
+            }
+            npc.setCustomTeleportCost(cost);
+            npcManager.saveAll();
+            if (cost < 0) {
+                player.sendMessage(PhilosNPCPlugin.cc("&a已恢复默认传送价格"));
+            } else if (cost == 0) {
+                player.sendMessage(PhilosNPCPlugin.cc("&a传送已设为免费"));
+            } else {
+                player.sendMessage(PhilosNPCPlugin.cc("&a传送价格已设为: &6" + cost + " 金币"));
+            }
             return;
         }
 
         if (pendingRename.containsKey(player.getUniqueId())) {
-            event.setCancelled(true);
             String npcId = pendingRename.remove(player.getUniqueId());
             var npc = npcManager.getNPC(npcId);
-            if (npc == null) return;
+            if (npc == null || !canEdit(player, npc)) return;
 
             if (msg.equalsIgnoreCase("cancel")) {
                 player.sendMessage(PhilosNPCPlugin.cc("&c已取消改名"));
@@ -1391,34 +1440,28 @@ public class GuiManager implements Listener {
                 player.sendMessage(PhilosNPCPlugin.cc("&c名字长度需为1-32个字符，请重新输入（或输入cancel取消）"));
                 return;
             }
-            // 异步线程不能修改NPC数据，回到主线程执行
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                npc.setDisplayName(name);
-                npcManager.saveAll();
-                // 重新生成NPC以更新头顶名字
-                npcManager.despawnNPC(npc);
-                npcManager.spawnNPC(npc);
-                player.sendMessage(PhilosNPCPlugin.cc("&a名字已修改为: &f" + name));
-            });
+            npc.setDisplayName(name);
+            npcManager.saveAll();
+            // 重新生成NPC以更新头顶名字
+            npcManager.despawnNPC(npc);
+            npcManager.spawnNPC(npc);
+            player.sendMessage(PhilosNPCPlugin.cc("&a名字已修改为: &f" + name));
             return;
         }
 
         if (pendingMessage.containsKey(player.getUniqueId())) {
-            event.setCancelled(true);
             String npcId = pendingMessage.remove(player.getUniqueId());
             var npc = npcManager.getNPC(npcId);
-            if (npc == null) return;
+            if (npc == null || !canEdit(player, npc)) return;
 
             if (msg.equalsIgnoreCase("cancel")) {
                 player.sendMessage(PhilosNPCPlugin.cc("&c已取消"));
                 return;
             }
             String content = msg;
-            Bukkit.getScheduler().runTask(plugin, () -> {
-                MessageFeature.setMessage(npc, content);
-                npcManager.saveAll();
-                player.sendMessage(PhilosNPCPlugin.cc("&a留言已保存"));
-            });
+            MessageFeature.setMessage(npc, content);
+            npcManager.saveAll();
+            player.sendMessage(PhilosNPCPlugin.cc("&a留言已保存"));
         }
     }
 
