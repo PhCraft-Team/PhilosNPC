@@ -1,7 +1,7 @@
-name: PhilosNPC
+name: ${pluginName}
 version: '${version}'
 main: com.phcraft.philosnpc.PhilosNPCPlugin
-api-version: '26.3'
+api-version: '${apiVersion}'
 author: PhCraft Team
 description: 功能NPC插件 - 创建可交互的玩家/系统NPC，支持商店/传送/点歌/留言
 depend:

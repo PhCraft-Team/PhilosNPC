@@ -32,3 +32,9 @@ Paper 目标仍是 ALPHA；不宣称兼容 Spigot、Folia 或所有后续 26.3 �
 - 未知传送扣款、失败/未知退款会在玩家 PDC 写入 `philosnpc:unresolved_teleport_payment` 并调用 `saveData()`。标记未解除前，所有收费传送入口（含 `/npc tp`）在调用 Vault 前拒绝执行；免费传送不受影响。
 - 管理员先按日志核对提供者账本，必要时在经济系统中人工补偿；之后使用 `/npc reconcileteleport <在线玩家UUID>` 解锁（沿用 `philosnpc.admin`）。命令仅清除状态并记录操作者，不重复扣款或退款。不要用删除玩家数据或降级插件跳过对账。
 - 新增回归覆盖返回 null、抛异常、失败退款、连续重试、恢复的持久容器、解锁后恢复以及免费传送。JUnit 总数 13。持久化采用 Bukkit 玩家保存机制，不声明跨进程崩溃事务保证。
+
+## 自动构建
+
+已补入 `PhCraft-Team/plugin-template` 的工作流、产物检查脚本、PR 模板和开发规范（来源提交 `97dde7a`）。版本、Java、Gradle 和 Paper 配置统一从 `plugin.json` 读取，`releaseEnabled` 保持 `false`。
+
+PR 会自动检查中文标题、构建、运行已有插件测试和 34 项脚本测试、校验 JAR，并上传保留 7 天的构建包。本地构建及这些检查已通过。
