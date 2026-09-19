@@ -13,6 +13,22 @@ import org.bukkit.entity.Player;
 public class TeleportFeature {
 
     private static final double TELEPORT_COST = 5.0;
+    private static final org.bukkit.NamespacedKey UNRESOLVED_PAYMENT =
+            new org.bukkit.NamespacedKey("philosnpc", "unresolved_teleport_payment");
+
+    private static void blockPayment(Player player, double cost) {
+        player.getPersistentDataContainer().set(UNRESOLVED_PAYMENT,
+                org.bukkit.persistence.PersistentDataType.DOUBLE, cost);
+        player.saveData();
+    }
+
+    /** 仅在管理员已核对经济账本后调用；此操作不扣款也不退款。 */
+    public static boolean reconcilePayment(Player player) {
+        if (!player.getPersistentDataContainer().has(UNRESOLVED_PAYMENT)) return false;
+        player.getPersistentDataContainer().remove(UNRESOLVED_PAYMENT);
+        player.saveData();
+        return true;
+    }
 
     /**
      * 设置传送目标点为editor当前位置
@@ -51,11 +67,16 @@ public class TeleportFeature {
             player.sendMessage(PhilosNPCPlugin.cc("&c传送目标或费用无效"));
             return false;
         }
+        if (cost > 0 && player.getPersistentDataContainer().has(UNRESOLVED_PAYMENT)) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c存在待核对的传送付款，已暂停收费传送，请联系管理员。"));
+            return false;
+        }
         var economy = PhilosNPCPlugin.economy();
         Payments.Result payment = Payments.transfer(economy, player, null, cost);
         if (payment != Payments.Result.SUCCESS) {
             player.sendMessage(PhilosNPCPlugin.cc("&c传送付款未完成；若余额异常，请联系管理员核对。"));
             if (payment == Payments.Result.UNCERTAIN) {
+                blockPayment(player, cost);
                 PhilosNPCPlugin.instance().getLogger().severe("传送付款结果未知：player="
                         + player.getUniqueId() + ", cost=" + cost);
             }
@@ -78,8 +99,11 @@ public class TeleportFeature {
                 }
             }
             player.sendMessage(PhilosNPCPlugin.cc(refunded ? "&c传送未成功，费用已退回。" : "&c传送未成功，退款异常，请联系管理员。"));
-            if (!refunded) PhilosNPCPlugin.instance().getLogger().severe("传送退款需核对：player="
-                    + player.getUniqueId() + ", cost=" + cost);
+            if (!refunded) {
+                blockPayment(player, cost);
+                PhilosNPCPlugin.instance().getLogger().severe("传送退款需核对：player="
+                        + player.getUniqueId() + ", cost=" + cost);
+            }
             return false;
         }
         player.sendMessage(PhilosNPCPlugin.cc("&a已传送，花费 " + cost + " 金币"));

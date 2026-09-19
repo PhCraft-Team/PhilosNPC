@@ -13,11 +13,11 @@
 ## 实际验证
 
 - `gradle --no-daemon clean build`：通过。
-- 11 项 JUnit 回归测试通过：自购、收款失败、退款失败、未知付款、非法价格、取消传送退款、缺失经济服务等。
+- 13 项 JUnit 回归测试通过：自购、收款失败、退款失败、未知付款、非法价格、取消传送退款、缺失经济服务等。
 - 10 个组织插件共同加载于 localhost 隔离世界，三个更新后的插件均启用并正常停服；RPG 示例三类配方继续可读。
 - 依赖环境：VaultUnlocked 2.20.1、EssentialsX 2.22.0、LuckPerms 5.5.85；经济服务注册存在。
 - `git diff --check`、JAR 的插件名称/版本/API 声明及入口类检查。
-- JAR：`PhilosNPC-1.2.0.jar`，SHA-256：`befd06ccff2249b1ff90cb7faff976864c36dc673d4dc2b7b26a3e14b7c4c91a`。
+- JAR：`PhilosNPC-1.2.0.jar`，SHA-256：`31a95c0a2ee9db706e4c727345a279a1f0b597e1b2889d8b6a19792323723dd9`。
 
 ## 影响与验证边界
 
@@ -26,3 +26,9 @@
 测试覆盖自动化回归与隔离服探针，未完成真人客户端的全部 GUI、多人交易、正式数据副本迁移或 Linux 验收。EssentialsX 仍报告不支持此 ALPHA 服务端；注册成功不等于经济系统已获生产认证。Windows 性能计数器告警未通过修改系统设置掩盖。
 
 Paper 目标仍是 ALPHA；不宣称兼容 Spigot、Folia 或所有后续 26.3 构建。升级前应另行备份世界、玩家、配置、插件及经济数据；回滚应恢复匹配备份，不仅降级 JAR。通用修复若要提前部署旧服，应单独移植到旧 API 分支并重新验收。
+
+## Review 跟进（2026-09-19）
+
+- 未知传送扣款、失败/未知退款会在玩家 PDC 写入 `philosnpc:unresolved_teleport_payment` 并调用 `saveData()`。标记未解除前，所有收费传送入口（含 `/npc tp`）在调用 Vault 前拒绝执行；免费传送不受影响。
+- 管理员先按日志核对提供者账本，必要时在经济系统中人工补偿；之后使用 `/npc reconcileteleport <在线玩家UUID>` 解锁（沿用 `philosnpc.admin`）。命令仅清除状态并记录操作者，不重复扣款或退款。不要用删除玩家数据或降级插件跳过对账。
+- 新增回归覆盖返回 null、抛异常、失败退款、连续重试、恢复的持久容器、解锁后恢复以及免费传送。JUnit 总数 13。持久化采用 Bukkit 玩家保存机制，不声明跨进程崩溃事务保证。

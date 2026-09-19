@@ -148,15 +148,32 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c这不是你的NPC"));
                     return true;
                 }
-                if (PhilosNPCPlugin.economy() != null) {
-                    EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, PhilosNPCPlugin.TP_TO_NPC_COST);
-                    if (!resp.transactionSuccess()) {
-                        player.sendMessage(PhilosNPCPlugin.cc("&c金币不够，传送需要 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
-                        return true;
-                    }
+                com.phcraft.philosnpc.features.TeleportFeature.teleport(player, npc.getLocation(), PhilosNPCPlugin.TP_TO_NPC_COST);
+            }
+            case "reconcileteleport" -> {
+                if (!player.hasPermission("philosnpc.admin")) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c你没有权限"));
+                    return true;
                 }
-                player.teleport(npc.getLocation());
-                player.sendMessage(PhilosNPCPlugin.cc("&a已传送到NPC，花费 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
+                if (args.length != 2) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c核对账本后使用: /" + label + " reconcileteleport <在线玩家UUID>"));
+                    return true;
+                }
+                Player target;
+                try {
+                    target = plugin.getServer().getPlayer(java.util.UUID.fromString(args[1]));
+                } catch (IllegalArgumentException ex) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c无效的玩家UUID"));
+                    return true;
+                }
+                if (target == null) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c请让待核对玩家上线后操作"));
+                    return true;
+                }
+                boolean cleared = com.phcraft.philosnpc.features.TeleportFeature.reconcilePayment(target);
+                if (cleared) plugin.getLogger().warning("管理员 " + player.getUniqueId()
+                        + " 确认已核对传送付款，解除玩家 " + target.getUniqueId() + " 的付款锁定");
+                player.sendMessage(PhilosNPCPlugin.cc(cleared ? "&a已解除锁定；未自动扣款或退款。" : "&7该玩家没有待核对的传送付款。"));
             }
             case "reload" -> {
                 if (!player.hasPermission("philosnpc.admin")) {
@@ -183,6 +200,7 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syscreate <类型> &7创建系统NPC，如 ZOMBIE、PLAYER:Notch"));
                     player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " syslist &7查看系统NPC列表"));
                     player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " reload &7重载插件"));
+                    player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " reconcileteleport <UUID> &7核对账本后解除在线玩家传送付款锁定"));
                 }
             }
             default -> {
