@@ -1,5 +1,7 @@
 # PhilosNPC
 
+> Paper 26.3 预研分支：编译目标固定为 `26.3.build.19-alpha`，运行需 Java 25。产物仅供隔离测试，验证结果见 `PAPER_26_3.md`；暂不作为正式服升级依据。
+
 ![Java](https://img.shields.io/badge/Java-25-orange)
 ![Paper](https://img.shields.io/badge/Paper-1.21+-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
