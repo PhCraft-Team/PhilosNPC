@@ -19,7 +19,7 @@ import java.util.List;
 
 /**
  * 各功能的设置/编辑 GUI 界面工厂
- * 提供传送设置、点歌台编辑、留言编辑、顾客功能选择等界面
+ * 提供传送设置、留言编辑、顾客功能选择等界面
  */
 public class FeatureGuiFactory {
 
@@ -97,62 +97,6 @@ public class FeatureGuiFactory {
                 Material.BARRIER,
                 "&c移除传送功能",
                 "&c警告：移除后需要重新添加",
-                "&7左键点击移除此功能"
-        ));
-
-        // 填充空白玻璃
-        fillEmptySlots(inv, 36);
-
-        return inv;
-    }
-
-    // ===== 点歌台编辑界面（36格） =====
-
-    /**
-     * 点歌台编辑界面
-     * @param npc NPC对象
-     * @return 点歌台编辑Inventory
-     */
-    public static Inventory jukeboxEditGui(PhilosNPC npc, InventoryHolder holder) {
-        Inventory inv = Bukkit.createInventory(holder, 36,
-                PhilosNPCPlugin.cc("&b&l点歌台编辑 - " + npc.getDisplayName()));
-
-        // slot 9-17 (9个格子): 唱片槽位，直接放jukeboxDiscs数组
-        ItemStack[] discs = npc.getJukeboxDiscs();
-        for (int i = 0; i < 9; i++) {
-            if (discs[i] != null && discs[i].getType() != Material.AIR) {
-                inv.setItem(9 + i, discs[i].clone());
-            } else {
-                inv.setItem(9 + i, GuiManager.markPlaceholder(createItem(
-                        Material.GRAY_STAINED_GLASS_PANE,
-                        "&7唱片槽位 " + (i + 1),
-                        "&7空槽位",
-                        "&e放入唱片以供玩家点歌"
-                )));
-            }
-        }
-
-        // slot 22: 说明牌 (BOOK)
-        inv.setItem(22, createItem(
-                Material.BOOK,
-                "&b使用说明",
-                "&7放入唱片，玩家可以点歌播放",
-                "&7最多支持 9 张唱片",
-                "&e将唱片拖入上方槽位即可添加"
-        ));
-
-        // slot 27: 返回按钮
-        inv.setItem(27, createItem(
-                Material.ARROW,
-                "&a返回",
-                "&7左键点击返回主界面"
-        ));
-
-        // slot 31: "移除功能"按钮
-        inv.setItem(31, createItem(
-                Material.BARRIER,
-                "&c移除点歌台功能",
-                "&c警告：移除后唱片将会丢失",
                 "&7左键点击移除此功能"
         ));
 
@@ -249,7 +193,8 @@ public class FeatureGuiFactory {
                 PhilosNPCPlugin.cc("&b&l" + npc.getDisplayName()));
 
         List<FeatureType> features = npc.getFeatures();
-        int[] featureSlots = {10, 12, 14, 16}; // 最多4个功能，居中排列
+        // 槽位必须与 GuiManager.handleCustomerClick 的 centeredRowSlots 完全一致
+        int[] featureSlots = com.phcraft.philosnpc.gui.NPCGui.centeredRowSlots(features.size());
 
         for (int i = 0; i < features.size() && i < featureSlots.length; i++) {
             FeatureType feature = features.get(i);
