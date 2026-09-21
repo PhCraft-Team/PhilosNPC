@@ -1,6 +1,7 @@
 package com.phcraft.philosnpc.gui;
 
 import com.phcraft.philosnpc.PhilosNPCPlugin;
+import com.phcraft.philosnpc.PluginSettings;
 import com.phcraft.philosnpc.npc.FeatureType;
 import com.phcraft.philosnpc.npc.NPCPose;
 import com.phcraft.philosnpc.npc.PhilosNPC;
@@ -71,7 +72,7 @@ public class NPCGui {
         inv.setItem(24, createItem(
                 Material.ENDER_PEARL,
                 "&a传送至NPC",
-                "&7花费: &6" + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币",
+                "&7花费: &6" + PluginSettings.tpToNpcCost() + " 金币",
                 "&7左键点击传送"
         ));
 
@@ -87,13 +88,13 @@ public class NPCGui {
         inv.setItem(31, createItem(
                 Material.BOOK,
                 "&b已启用功能",
-                "&7共 " + npc.getFeatures().size() + " / " + PhilosNPCPlugin.MAX_FEATURES + " 个功能"
+                "&7共 " + npc.getFeatures().size() + " / " + PluginSettings.maxFeatures() + " 个功能"
         ));
 
-        // slot 38-41: 4个功能槽位
-        int[] featureSlots = {38, 39, 40, 41};
+        // 第5行功能槽位：与 handleMainClick 的 mainFeatureSlots 算法一致
+        int[] featureSlots = mainFeatureSlots(npc);
         List<FeatureType> features = npc.getFeatures();
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < featureSlots.length; i++) {
             if (i < features.size()) {
                 FeatureType feature = features.get(i);
                 inv.setItem(featureSlots[i], createFeatureItem(feature));
@@ -229,15 +230,20 @@ public class NPCGui {
         Inventory inv = Bukkit.createInventory(holder, 27, PhilosNPCPlugin.cc("&b&l选择功能 - " + npc.getDisplayName()));
 
         FeatureType[] features = FeatureType.values();
-        int[] slots = {10, 12, 14, 16};
+        // 功能按钮按数量在第2行(9-17)居中排列
+        int[] slots = centeredRowSlots(features.length);
 
         for (int i = 0; i < features.length && i < slots.length; i++) {
             FeatureType feature = features[i];
             if (npc.hasFeature(feature)) {
                 // 已启用 - 灰色状态
                 inv.setItem(slots[i], createDisabledFeatureItem(feature));
+            } else if (feature == FeatureType.GIFT_PACK && !npc.isSystem()) {
+                // 礼包发放：仅系统NPC可添加，个人NPC显示锁定状态
+                inv.setItem(slots[i], createLockedFeatureItem(feature));
             } else {
-                inv.setItem(slots[i], createFeatureItem(feature));
+                // 未启用 - 显示费用（个人NPC收费，系统NPC免费）
+                inv.setItem(slots[i], createPurchasableFeatureItem(feature, npc));
             }
         }
 
@@ -259,18 +265,13 @@ public class NPCGui {
         Inventory inv = Bukkit.createInventory(holder, 27, PhilosNPCPlugin.cc("&b&l选择姿势 - " + npc.getDisplayName()));
 
         NPCPose[] poses = NPCPose.values();
-        // 13种姿势：第2行 slot 10-16（7个），第3行 slot 19-25（6个）
+        // 2种姿势居中摆放：slot 10（站立）、12（坐着）
         for (int i = 0; i < poses.length; i++) {
             NPCPose pose = poses[i];
             Material material = poseMaterial(pose);
             boolean isCurrent = npc.getPose() == pose;
 
-            int slot;
-            if (i < 7) {
-                slot = 10 + i;
-            } else {
-                slot = 19 + (i - 7);
-            }
+            int slot = 10 + i * 2;
 
             if (isCurrent) {
                 inv.setItem(slot, createItem(
@@ -416,6 +417,36 @@ public class NPCGui {
 
     // ===== 辅助方法 =====
 
+    /**
+     * 第2行(槽9-17)内按数量居中的连续槽位（用于功能选择/顾客界面，最多9个）
+     */
+    public static int[] centeredRowSlots(int count) {
+        count = Math.min(Math.max(count, 0), 9);
+        int start = 9 + (9 - count) / 2;
+        int[] slots = new int[count];
+        for (int i = 0; i < count; i++) {
+            slots[i] = start + i;
+        }
+        return slots;
+    }
+
+    /**
+     * 主界面第5行(槽36-44)的功能槽位：数量取已启用功能数与配置上限的较大者（最多9）
+     */
+    public static int[] mainFeatureSlots(PhilosNPC npc) {
+        int count = featureDisplayCount(npc);
+        int start = 36 + (9 - count) / 2;
+        int[] slots = new int[count];
+        for (int i = 0; i < count; i++) {
+            slots[i] = start + i;
+        }
+        return slots;
+    }
+
+    public static int featureDisplayCount(PhilosNPC npc) {
+        return Math.max(npc.getFeatures().size(), Math.min(PluginSettings.maxFeatures(), 9));
+    }
+
     private static ItemStack createItem(Material material, String name, String... loreLines) {
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
@@ -471,7 +502,7 @@ public class NPCGui {
             lore.add(PhilosNPCPlugin.cc("&7类型: &f" + npc.getNpcType().displayName()));
             lore.add(PhilosNPCPlugin.cc("&7ID: &f" + displayId(npc.getId())));
             lore.add(PhilosNPCPlugin.cc("&7姿势: &f" + npc.getPose().displayName()));
-            lore.add(PhilosNPCPlugin.cc("&7功能: &f" + npc.getFeatures().size() + "/4"));
+            lore.add(PhilosNPCPlugin.cc("&7功能: &f" + npc.getFeatures().size() + "/" + PluginSettings.maxFeatures()));
 
             if (npc.getLocation() != null && npc.getLocation().getWorld() != null) {
                 lore.add(PhilosNPCPlugin.cc("&7位置: &f" + npc.getLocation().getWorld().getName()
@@ -504,6 +535,29 @@ public class NPCGui {
         );
     }
 
+    /**
+     * 功能选择界面的待添加功能按钮：标明添加费用（个人NPC收费，系统NPC免费）
+     */
+    private static ItemStack createPurchasableFeatureItem(FeatureType feature, PhilosNPC npc) {
+        Material material = parseMaterial(feature.icon(), Material.STONE);
+        if (npc.isSystem() || PluginSettings.featureAddCost() <= 0) {
+            return createItem(
+                    material,
+                    "&a" + feature.displayName(),
+                    "&7" + feature.description(),
+                    "&a免费添加",
+                    "&e左键点击添加"
+            );
+        }
+        return createItem(
+                material,
+                "&a" + feature.displayName(),
+                "&7" + feature.description(),
+                "&6费用: &f" + PluginSettings.featureAddCost() + " 金币",
+                "&e左键点击付费添加"
+        );
+    }
+
     private static ItemStack createDisabledFeatureItem(FeatureType feature) {
         Material material = parseMaterial(feature.icon(), Material.STONE);
         ItemStack item = new ItemStack(material);
@@ -519,6 +573,16 @@ public class NPCGui {
         return item;
     }
 
+    private static ItemStack createLockedFeatureItem(FeatureType feature) {
+        Material material = parseMaterial(feature.icon(), Material.STONE);
+        return createItem(
+                material,
+                "&8" + feature.displayName() + " (仅系统NPC)",
+                "&7" + feature.description(),
+                "&c此功能仅系统NPC可添加"
+        );
+    }
+
     private static ItemStack createEmptyFeatureSlot() {
         return createItem(
                 Material.LIME_STAINED_GLASS_PANE,
@@ -529,34 +593,11 @@ public class NPCGui {
 
     private static Material poseMaterial(NPCPose pose) {
         switch (pose) {
-            case STANDING:
-                return Material.ARMOR_STAND;
-            case SNEAKING:
-                return Material.LEATHER_LEGGINGS;
             case SITTING:
                 return Material.OAK_STAIRS;
-            case LYING:
-                return Material.WHITE_BED;
-            case DANCING:
-                return Material.JUKEBOX;
-            case WAVE:
-                return Material.FEATHER;
-            case ARMS_CROSSED:
-                return Material.SHIELD;
-            case THUMBS_UP:
-                return Material.EMERALD;
-            case BOWING:
-                return Material.BOW;
-            case SUPERMAN:
-                return Material.ELYTRA;
-            case POINTING:
-                return Material.SPYGLASS;
-            case MEDITATION:
-                return Material.AMETHYST_SHARD;
-            case FACEPALM:
-                return Material.PAPER;
+            case STANDING:
             default:
-                return Material.STONE;
+                return Material.ARMOR_STAND;
         }
     }
 

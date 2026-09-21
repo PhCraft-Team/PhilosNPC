@@ -35,9 +35,9 @@ public class PhilosCommand implements CommandExecutor {
                     return true;
                 }
                 if (PhilosNPCPlugin.economy() != null) {
-                    if (!PhilosNPCPlugin.economy().has(player, PhilosNPCPlugin.CREATE_COST)) {
+                    if (!PhilosNPCPlugin.economy().has(player, PluginSettings.createCost())) {
                         player.sendMessage(PhilosNPCPlugin.cc(
-                                "&c金币不足！创建NPC需要 " + PhilosNPCPlugin.CREATE_COST + " 金币"));
+                                "&c金币不足！创建NPC需要 " + PluginSettings.createCost() + " 金币"));
                         return true;
                     }
                 }
@@ -148,15 +148,16 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c这不是你的NPC"));
                     return true;
                 }
-                if (PhilosNPCPlugin.economy() != null) {
-                    EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, PhilosNPCPlugin.TP_TO_NPC_COST);
+                if (PhilosNPCPlugin.economy() != null && PluginSettings.tpToNpcCost() > 0) {
+                    EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, PluginSettings.tpToNpcCost());
                     if (!resp.transactionSuccess()) {
-                        player.sendMessage(PhilosNPCPlugin.cc("&c金币不够，传送需要 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
+                        player.sendMessage(PhilosNPCPlugin.cc("&c金币不够，传送需要 " + PluginSettings.tpToNpcCost() + " 金币"));
                         return true;
                     }
                 }
                 player.teleport(npc.getLocation());
-                player.sendMessage(PhilosNPCPlugin.cc("&a已传送到NPC，花费 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
+                player.sendMessage(PhilosNPCPlugin.cc("&a已传送到NPC"
+                        + (PluginSettings.tpToNpcCost() > 0 && PhilosNPCPlugin.economy() != null ? "，花费 " + PluginSettings.tpToNpcCost() + " 金币" : "")));
             }
             case "reload" -> {
                 if (!player.hasPermission("philosnpc.admin")) {
@@ -166,17 +167,18 @@ public class PhilosCommand implements CommandExecutor {
                 plugin.npcManager().saveAll();
                 plugin.npcManager().despawnAll();
                 plugin.reloadConfig();
+                PluginSettings.load(plugin.getConfig());
                 plugin.npcManager().loadAll();
-                player.sendMessage(PhilosNPCPlugin.cc("&a已重载"));
+                player.sendMessage(PhilosNPCPlugin.cc("&a已重载（配置与费用已生效）"));
             }
             case "help" -> {
                 player.sendMessage(PhilosNPCPlugin.cc("&b&l===== PhilosNPC 命令 ====="));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " create &7在脚下创建NPC，花 " + PhilosNPCPlugin.CREATE_COST + " 金币"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " create &7在脚下创建NPC，花 " + PluginSettings.createCost() + " 金币"));
                 player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " list &7打开我的NPC列表"));
                 player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " edit <id> &7打开NPC编辑界面"));
                 player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " move <id> &7把NPC移到你脚下"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " delete <id> &7删除NPC，不可恢复"));
-                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " tp <id> &7传送到NPC，花 " + PhilosNPCPlugin.TP_TO_NPC_COST + " 金币"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " delete <id> &7删除NPC，退回 &6" + PluginSettings.deleteRefund() + " 金币"));
+                player.sendMessage(PhilosNPCPlugin.cc("&e/" + label + " tp <id> &7传送到NPC，花 " + PluginSettings.tpToNpcCost() + " 金币"));
                 player.sendMessage(PhilosNPCPlugin.cc("&7ID在列表和编辑界面可查，输入前几位即可匹配"));
                 if (player.hasPermission("philosnpc.admin")) {
                     player.sendMessage(PhilosNPCPlugin.cc("&b&l----- 管理员 -----"));

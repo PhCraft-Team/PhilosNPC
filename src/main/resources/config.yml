@@ -1,13 +1,20 @@
 # PhilosNPC 配置文件
+# 所有费用单位为金币（需要 Vault + 经济插件生效），修改后可用 /pnpc reload 热重载
 
-# 创建NPC费用
+# 创建个人NPC的费用
 create-cost: 500.0
 
-# 传送到NPC的费用
+# 传送到自己NPC的费用（/pnpc tp 与编辑界面的"传送至NPC"按钮）
 tp-to-npc-cost: 10.0
 
-# 传送功能默认费用（个人NPC固定价格）
+# 传送功能默认收费（顾客使用NPC传送功能时扣除；系统NPC可在界面中单独自定义价格）
 teleport-feature-cost: 5.0
 
+# 每添加一种功能的花费（个人NPC收费，系统NPC免费）
+feature-add-cost: 100.0
+
+# 删除个人NPC时退还给主人的费用（0 = 不退款）
+delete-refund: 250.0
+
 # 每个NPC最多可启用的功能数
-max-features: 4
+max-features: 5

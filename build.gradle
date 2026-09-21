@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'com.gradleup.shadow' version '9.0.0-beta12'
 }
 
 group = 'com.phcraft'
@@ -15,6 +16,10 @@ repositories {
         name = 'jitpack'
         url = 'https://jitpack.io'
     }
+    maven {
+        name = 'codemc'
+        url = 'https://repo.codemc.io/repository/maven-releases/'
+    }
 }
 
 dependencies {
@@ -22,11 +27,29 @@ dependencies {
     compileOnly('com.github.MilkBowl:VaultAPI:1.7') {
         exclude group: 'org.bukkit', module: 'bukkit'
     }
+    implementation 'com.github.retrooper:packetevents-spigot:2.13.0'
+}
+
+shadowJar {
+    archiveClassifier = ''
+    relocate 'com.github.retrooper', 'com.phcraft.philosnpc.libs.packetevents.api'
+    relocate 'io.github.retrooper', 'com.phcraft.philosnpc.libs.packetevents.spigot'
+    // packetevents-spigot 自带 plugin.yml（主类 io.github.retrooper.packetevents.PacketEventsPlugin），
+    // 与我们的重复后 Paper 可能读到它并报 ClassNotFoundException，去重只保留先加入的自己的
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// 禁用普通jar：与shadowJar同名输出会互相覆盖
+tasks.jar {
+    enabled = false
+}
+tasks.assemble {
+    dependsOn tasks.shadowJar
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 tasks.processResources {
@@ -38,4 +61,5 @@ tasks.processResources {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+    options.release = 21
 }

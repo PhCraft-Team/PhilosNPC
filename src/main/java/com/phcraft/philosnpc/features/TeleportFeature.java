@@ -1,6 +1,7 @@
 package com.phcraft.philosnpc.features;
 
 import com.phcraft.philosnpc.PhilosNPCPlugin;
+import com.phcraft.philosnpc.PluginSettings;
 import com.phcraft.philosnpc.npc.PhilosNPC;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Location;
@@ -11,8 +12,6 @@ import org.bukkit.entity.Player;
  * 玩家可以花费固定金额传送到NPC设定的目标点
  */
 public class TeleportFeature {
-
-    private static final double TELEPORT_COST = 5.0;
 
     /**
      * 设置传送目标点为editor当前位置
@@ -57,15 +56,17 @@ public class TeleportFeature {
         player.teleport(target);
         player.sendMessage(PhilosNPCPlugin.cc(
                 "&a已传送，花费 " + cost + " 金币"));
+        // 使用成功通知主人（系统NPC与本人使用由notify内部过滤）
+        UsageNotify.notify(npc, player,
+                "&e" + player.getName() + " &a使用了你的 &f" + npc.getDisplayName() + " &a的传送功能");
 
         return true;
     }
 
     /**
-     * 获取传送费用
-     * @return 传送费用（固定5.0）
+     * 获取传送费用（config.yml 的 teleport-feature-cost，可 /pnpc reload 热调）
      */
     public static double getTeleportCost() {
-        return TELEPORT_COST;
+        return PluginSettings.teleportFeatureCost();
     }
 }

@@ -58,10 +58,21 @@ public class ShopGui {
                 "&e这是你所有NPC共享的商店背包"
         ));
 
+        // slot 42: 收购背包 (HOPPER)
+        inv.setItem(42, createItem(
+                Material.HOPPER,
+                "&d收购背包",
+                "&7物物交易收到的物品",
+                "&7会自动存入这里",
+                "&7你所有的NPC共享此背包",
+                "&7容量无限，随时可取回",
+                "&e左键点击查看/取回"
+        ));
+
         return inv;
     }
 
-    // ===== 交易配方编辑界面（54格，统一金币交易） =====
+    // ===== 交易配方编辑界面（54格，支持金币/物品两种交易模式） =====
 
     public static Inventory tradeEditGui(PhilosNPC npc, int page, InventoryHolder holder) {
         String title = npc.isSystem()
@@ -81,53 +92,81 @@ public class ShopGui {
             }
         }
 
-        // 第4行：产出物品槽（29）+ 添加按钮（30）+ 说明（31），价格统一为金币聊天输入
-        inv.setItem(27, GuiManager.markPlaceholder(createItem(
-                Material.GRAY_STAINED_GLASS_PANE,
-                "&7金币交易",
-                "&7价格无需放入物品",
-                "&7添加后在聊天框输入"
-        )));
-        inv.setItem(28, GuiManager.markPlaceholder(createItem(
-                Material.GRAY_STAINED_GLASS_PANE,
-                "&7金币交易",
-                "&7价格在聊天框输入"
-        )));
+        // 第4行：价格槽（27/28）+ 产出槽（29）+ 添加（30）+ 模式开关（31）+ 说明（32）
+        boolean itemMode = npc.isShopItemTradeMode();
+        if (itemMode) {
+            inv.setItem(27, GuiManager.markPlaceholder(createItem(
+                    Material.PAPER,
+                    "&e价格物品槽位 1",
+                    "&7放入第一种价格物品",
+                    "&7（物物交换必填）"
+            )));
+            inv.setItem(28, GuiManager.markPlaceholder(createItem(
+                    Material.PAPER,
+                    "&e价格物品槽位 2",
+                    "&7放入第二种价格物品",
+                    "&7（可选，最多两种价格）"
+            )));
+        } else {
+            inv.setItem(27, GuiManager.markPlaceholder(createItem(
+                    Material.GRAY_STAINED_GLASS_PANE,
+                    "&7金币交易",
+                    "&7价格无需放入物品",
+                    "&7添加后在聊天框输入"
+            )));
+            inv.setItem(28, GuiManager.markPlaceholder(createItem(
+                    Material.GRAY_STAINED_GLASS_PANE,
+                    "&7金币交易",
+                    "&7价格在聊天框输入"
+            )));
+        }
+
         inv.setItem(29, GuiManager.markPlaceholder(createItem(
                 Material.PAPER,
                 "&e产出物品槽位",
                 "&7将产出物品放入此槽位",
-                "&7点击添加后在聊天框输入价格"
+                itemMode ? "&7点击添加即完成物物交换" : "&7点击添加后在聊天框输入价格"
         )));
 
         inv.setItem(30, createItem(
                 Material.EMERALD,
                 "&a&l点击添加交易",
-                "&7读取左侧产出物品",
-                "&7然后在聊天框输入金币价格"
+                itemMode ? "&7读取价格物品(槽27/28)" : "&7读取左侧产出物品",
+                itemMode ? "&7与产出物品(槽29)" : "&7然后在聊天框输入金币价格"
+        ));
+
+        // 交易模式开关：物品交易(以物换物) / 金币交易
+        inv.setItem(31, createItem(
+                itemMode ? Material.CHEST : Material.GOLD_INGOT,
+                itemMode ? "&6交易模式：&b物品交易" : "&6交易模式：&e金币交易",
+                itemMode ? "&7新增交易以物换物结算" : "&7新增交易以金币结算",
+                itemMode ? "&e点击切换为金币交易" : "&e点击切换为物品交易(以物换物)",
+                "&7已添加的交易不受影响"
         ));
 
         if (npc.isSystem()) {
-            inv.setItem(31, createItem(
+            inv.setItem(32, createItem(
                     Material.BOOK,
                     "&b说明",
-                    "&7系统NPC交易统一使用金币结算",
-                    "&7添加交易：放入产出物品，",
-                    "&7点击添加，聊天框输入价格",
+                    "&7金币模式：放入产出点击添加，",
+                    "&7聊天框输入价格",
+                    "&7物品模式：价格槽27/28+产出槽29，",
+                    "&7点击添加即完成",
                     "&7产出物品由系统直接生成"
             ));
         } else {
-            inv.setItem(31, createItem(
+            inv.setItem(32, createItem(
                     Material.BOOK,
                     "&b库存说明",
-                    "&7交易统一使用金币结算",
                     "&7出售的产出物品将从你的",
                     "&7共享商店背包中扣除",
+                    "&7物物交易收到的物品",
+                    "&7会自动存入你的收购背包",
                     "&7请在商店背包界面补充库存"
             ));
         }
 
-        for (int i = 32; i < 36; i++) {
+        for (int i = 33; i < 36; i++) {
             inv.setItem(i, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
         }
 
@@ -161,6 +200,79 @@ public class ShopGui {
         for (int i = 45; i < 54; i++) {
             inv.setItem(i, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
         }
+
+        return inv;
+    }
+
+    // ===== 收购背包界面（54格，物物交易收入，无限容量可翻页） =====
+
+    /**
+     * 收购背包界面：0-44展示物品（45个/页），
+     * 45上一页 / 49一键取回全部 / 51下一页 / 53返回
+     */
+    public static Inventory collectionBackpackGui(PhilosNPC npc, int page, InventoryHolder holder) {
+        List<ItemStack> backpack = PhilosNPCPlugin.instance().npcManager()
+                .getCollectionBackpack(npc.getOwnerUuid());
+
+        int itemsPerPage = 45;
+        int totalPages = Math.max(1, (backpack.size() + itemsPerPage - 1) / itemsPerPage);
+        if (page >= totalPages) page = totalPages - 1;
+        if (page < 0) page = 0;
+
+        Inventory inv = Bukkit.createInventory(holder, 54,
+                PhilosNPCPlugin.cc("&b&l收购背包 - 第" + (page + 1) + "/" + totalPages + "页"));
+
+        int start = page * itemsPerPage;
+        for (int i = 0; i < itemsPerPage; i++) {
+            int index = start + i;
+            if (index < backpack.size()) {
+                inv.setItem(i, backpack.get(index).clone());
+            }
+        }
+
+        boolean hasPrev = page > 0;
+        inv.setItem(45, createItem(
+                hasPrev ? Material.ARROW : Material.LEVER,
+                hasPrev ? "&a上一页" : "&7已是第一页",
+                hasPrev ? "&7左键点击上一页" : "&c没有上一页了"
+        ));
+
+        if (backpack.isEmpty()) {
+            inv.setItem(49, createItem(
+                    Material.CHEST,
+                    "&7收购背包是空的",
+                    "&7玩家NPC物物交易收到的物品",
+                    "&7会自动存入这里"
+            ));
+        } else {
+            inv.setItem(49, createItem(
+                    Material.CHEST,
+                    "&a&l一键取回全部",
+                    "&7共有 &f" + backpack.size() + " &7组物品",
+                    "&7超出背包容量的物品",
+                    "&7将掉落在你脚下",
+                    "&e左键点击取回"
+            ));
+        }
+
+        boolean hasNext = page < totalPages - 1;
+        inv.setItem(51, createItem(
+                hasNext ? Material.ARROW : Material.LEVER,
+                hasNext ? "&a下一页" : "&7已是最后一页",
+                hasNext ? "&7左键点击下一页" : "&c没有下一页了"
+        ));
+
+        inv.setItem(53, createItem(
+                Material.BARRIER,
+                "&c返回",
+                "&7左键点击返回商店背包界面"
+        ));
+
+        for (int i = 46; i < 49; i++) {
+            inv.setItem(i, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
+        }
+        inv.setItem(50, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
+        inv.setItem(52, createItem(Material.GRAY_STAINED_GLASS_PANE, "&r "));
 
         return inv;
     }

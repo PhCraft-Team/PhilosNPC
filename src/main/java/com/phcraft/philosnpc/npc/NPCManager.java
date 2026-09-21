@@ -1,10 +1,10 @@
 package com.phcraft.philosnpc.npc;
 
 import com.phcraft.philosnpc.PhilosNPCPlugin;
+import com.phcraft.philosnpc.PluginSettings;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
-import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -21,8 +21,6 @@ import org.bukkit.entity.ArmorStand;
 import org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.LeatherArmorMeta;
-import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.util.EulerAngle;
@@ -38,9 +36,20 @@ public class NPCManager {
     private final Map<Integer, String> entityIdMap;
     private final Map<UUID, ItemStack[]> sharedShopInventories;
     private final File dataFile;
+    // 收购背包（物物交易收入）：按玩家UUID共享，独立文件存储，无限容量
+    private final Map<UUID, List<ItemStack>> collectionBackpacks;
+    private final File backpackFile;
+    // 村民式头部动画状态（entityId -> 状态）
+    private final Map<Integer, HeadState> headStates = new HashMap<>();
+    // 已生成NPC的实体引用（entityId -> 实体），供动画循环快速访问
+    private final Map<Integer, Entity> entityRefs = new HashMap<>();
+    // 玩家形态NPC（PacketEvents虚拟实体）
+    private final PlayerNpcSpawner playerNpcSpawner = new PlayerNpcSpawner();
 
-    // 默认皮革装备颜色（史蒂夫配色：蓝青色系）
-    private static final Color DEFAULT_LEATHER_COLOR = Color.fromRGB(70, 130, 180); // 钢蓝色
+    private void registerEntity(Entity entity, String npcId) {
+        entityIdMap.put(entity.getEntityId(), npcId);
+        entityRefs.put(entity.getEntityId(), entity);
+    }
 
     public NPCManager() {
         this.plugin = PhilosNPCPlugin.instance();
@@ -48,12 +57,17 @@ public class NPCManager {
         this.entityIdMap = new HashMap<>();
         this.sharedShopInventories = new HashMap<>();
         this.dataFile = new File(plugin.getDataFolder(), "npcs.yml");
+        this.collectionBackpacks = new HashMap<>();
+        this.backpackFile = new File(plugin.getDataFolder(), "collection_backpacks.yml");
     }
 
     // ===== 加载 / 保存 =====
 
     @SuppressWarnings("unchecked")
     public void loadAll() {
+        // 加载收购背包（独立文件，与NPC数据无关）
+        loadCollectionBackpacks();
+
         if (!dataFile.exists()) {
             plugin.saveResource("npcs.yml", false);
         }
@@ -112,16 +126,99 @@ public class NPCManager {
         } catch (IOException e) {
             plugin.getLogger().severe("保存NPC数据失败: " + e.getMessage());
         }
+
+        saveCollectionBackpacks();
+    }
+
+    // ===== 收购背包（物物交易收入，按玩家共享） =====
+
+    /**
+     * 获取指定玩家的收购背包（为空时自动创建）
+     */
+    public List<ItemStack> getCollectionBackpack(UUID ownerUuid) {
+        return collectionBackpacks.computeIfAbsent(ownerUuid, k -> new ArrayList<>());
+    }
+
+    /**
+     * 收购物品入包：同类物品尽量并入已有堆，放不下则追加新条目
+     */
+    public void addItemToCollectionBackpack(UUID ownerUuid, ItemStack item) {
+        if (item == null || item.getType().isAir()) return;
+        ItemStack add = item.clone();
+        List<ItemStack> backpack = getCollectionBackpack(ownerUuid);
+        int max = add.getMaxStackSize();
+        for (ItemStack existing : backpack) {
+            if (add.getAmount() <= 0) break;
+            if (existing.isSimilar(add) && existing.getAmount() < max) {
+                int move = Math.min(max - existing.getAmount(), add.getAmount());
+                existing.setAmount(existing.getAmount() + move);
+                add.setAmount(add.getAmount() - move);
+            }
+        }
+        if (add.getAmount() > 0) {
+            backpack.add(add);
+        }
+    }
+
+    /**
+     * 清空并返回收购背包全部物品（一键取回）
+     */
+    public List<ItemStack> clearCollectionBackpack(UUID ownerUuid) {
+        List<ItemStack> backpack = collectionBackpacks.remove(ownerUuid);
+        return backpack != null ? backpack : new ArrayList<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadCollectionBackpacks() {
+        if (!backpackFile.exists()) return;
+        FileConfiguration config = YamlConfiguration.loadConfiguration(backpackFile);
+        var section = config.getConfigurationSection("backpacks");
+        if (section == null) return;
+        for (String key : section.getKeys(false)) {
+            try {
+                UUID ownerUuid = UUID.fromString(key);
+                List<ItemStack> items = new ArrayList<>();
+                for (Map<?, ?> rawMap : config.getMapList("backpacks." + key)) {
+                    try {
+                        items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
+                    } catch (IllegalArgumentException ignored) {
+                        // 单个物品损坏时跳过，不影响整包加载
+                    }
+                }
+                collectionBackpacks.put(ownerUuid, items);
+            } catch (IllegalArgumentException ignored) {
+                plugin.getLogger().warning("收购背包数据包含无效的UUID: " + key);
+            }
+        }
+    }
+
+    private void saveCollectionBackpacks() {
+        FileConfiguration config = new YamlConfiguration();
+        for (Map.Entry<UUID, List<ItemStack>> entry : collectionBackpacks.entrySet()) {
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (ItemStack item : entry.getValue()) {
+                if (item != null && !item.getType().isAir()) {
+                    items.add(item.serialize());
+                }
+            }
+            if (!items.isEmpty()) {
+                config.set("backpacks." + entry.getKey(), items);
+            }
+        }
+        try {
+            config.save(backpackFile);
+        } catch (IOException e) {
+            plugin.getLogger().severe("保存收购背包失败: " + e.getMessage());
+        }
     }
 
     // ===== 创建 / 删除 =====
 
     public PhilosNPC createNPC(Player player) {
-        // 扣500块
-        if (PhilosNPCPlugin.economy() != null) {
-            EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, PhilosNPCPlugin.CREATE_COST);
+        if (PhilosNPCPlugin.economy() != null && PluginSettings.createCost() > 0) {
+            EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, PluginSettings.createCost());
             if (!resp.transactionSuccess()) {
-                player.sendMessage(PhilosNPCPlugin.cc("&c金币不足！创建NPC需要 " + PhilosNPCPlugin.CREATE_COST + " 金币"));
+                player.sendMessage(PhilosNPCPlugin.cc("&c金币不足！创建NPC需要 " + PluginSettings.createCost() + " 金币"));
                 return null;
             }
         }
@@ -131,42 +228,21 @@ public class NPCManager {
         npc.setId(generateShortId(player.getName(), false));
         npcs.put(npc.getId(), npc);
 
-        // 设置默认装备：玩家皮肤头颅 + 皮革装备 + 主手物品
+        // 玩家形态：捕获创建者皮肤（含签名，正版/离线服均可用）
+        captureSkin(npc, player);
+
+        // 装备：复制创建者身上的装备（盔甲+主手），无则留空（玩家模型自带身体）
         ItemStack[] npcEquip = npc.getEquipment();
-
-        // 头盔：玩家皮肤头颅（必设，保证显示玩家头）
-        npcEquip[0] = createPlayerHead(player.getName());
-
-        // 胸甲/护腿/靴子：默认皮革装备（史蒂夫蓝配色），如果玩家有穿则用玩家的
         ItemStack[] playerEquip = player.getEquipment().getArmorContents();
         // playerEquip顺序: 0=靴子, 1=护腿, 2=胸甲, 3=头盔
         // npcEquip顺序: 0=头盔, 1=胸甲, 2=护腿, 3=靴子, 4=主手
-
-        // 胸甲
-        if (playerEquip[2] != null && playerEquip[2].getType() != Material.AIR) {
-            npcEquip[1] = playerEquip[2].clone();
-        } else {
-            npcEquip[1] = createLeatherArmor(Material.LEATHER_CHESTPLATE, DEFAULT_LEATHER_COLOR);
-        }
-        // 护腿
-        if (playerEquip[1] != null && playerEquip[1].getType() != Material.AIR) {
-            npcEquip[2] = playerEquip[1].clone();
-        } else {
-            npcEquip[2] = createLeatherArmor(Material.LEATHER_LEGGINGS, DEFAULT_LEATHER_COLOR);
-        }
-        // 靴子
-        if (playerEquip[0] != null && playerEquip[0].getType() != Material.AIR) {
-            npcEquip[3] = playerEquip[0].clone();
-        } else {
-            npcEquip[3] = createLeatherArmor(Material.LEATHER_BOOTS, DEFAULT_LEATHER_COLOR);
-        }
-        // 主手
+        if (playerEquip[3] != null && playerEquip[3].getType() != Material.AIR) npcEquip[0] = playerEquip[3].clone();
+        if (playerEquip[2] != null && playerEquip[2].getType() != Material.AIR) npcEquip[1] = playerEquip[2].clone();
+        if (playerEquip[1] != null && playerEquip[1].getType() != Material.AIR) npcEquip[2] = playerEquip[1].clone();
+        if (playerEquip[0] != null && playerEquip[0].getType() != Material.AIR) npcEquip[3] = playerEquip[0].clone();
         if (player.getEquipment().getItemInMainHand() != null
                 && player.getEquipment().getItemInMainHand().getType() != Material.AIR) {
             npcEquip[4] = player.getEquipment().getItemInMainHand().clone();
-        } else {
-            // 默认手持物品
-            npcEquip[4] = new ItemStack(Material.STICK);
         }
 
         // 同步共享商店背包到新NPC
@@ -176,7 +252,8 @@ public class NPCManager {
         spawnNPC(npc);
         saveAll();
 
-        player.sendMessage(PhilosNPCPlugin.cc("&a已创建NPC，ID: &f" + npc.getId() + "&a，花费 " + PhilosNPCPlugin.CREATE_COST + " 金币"));
+        player.sendMessage(PhilosNPCPlugin.cc("&a已创建NPC，ID: &f" + npc.getId()
+                + (PluginSettings.createCost() > 0 && PhilosNPCPlugin.economy() != null ? "&a，花费 " + PluginSettings.createCost() + " 金币" : "")));
         return npc;
     }
 
@@ -210,6 +287,16 @@ public class NPCManager {
     public boolean deleteNPC(String id) {
         PhilosNPC npc = npcs.get(id);
         if (npc == null) return false;
+
+        // 个人NPC删除退款给主人（金额见 config.yml，0=不退款）
+        if (!npc.isSystem() && PhilosNPCPlugin.economy() != null && PluginSettings.deleteRefund() > 0) {
+            PhilosNPCPlugin.economy().depositPlayer(
+                    Bukkit.getOfflinePlayer(npc.getOwnerUuid()), PluginSettings.deleteRefund());
+            Player owner = Bukkit.getPlayer(npc.getOwnerUuid());
+            if (owner != null) {
+                owner.sendMessage(PhilosNPCPlugin.cc("&e你的NPC被删除，退回 &6" + PluginSettings.deleteRefund() + " 金币"));
+            }
+        }
 
         despawnNPC(npc);
         npcs.remove(id);
@@ -336,6 +423,10 @@ public class NPCManager {
         Location loc = npc.getLocation();
         if (loc == null || loc.getWorld() == null) return;
 
+        // 清理崩溃残留的孤儿实体：服务器非正常关停时持久化实体留在区块里，
+        // 重启后这里删除未被管理的同ID实体，避免与新生成的NPC重复
+        cleanupOrphanEntities(npc.getId());
+
         World world = loc.getWorld();
 
         if (npc.isSystem() && npc.getEntityTypeName() != null) {
@@ -346,145 +437,136 @@ public class NPCManager {
     }
 
     private void spawnPersonalNPC(PhilosNPC npc, Location loc, World world) {
-        ArmorStand entity = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
-
-        entity.setCustomName(PhilosNPCPlugin.cc(npc.getDisplayName()));
-        entity.setCustomNameVisible(true);
-        entity.setInvulnerable(true);
-        entity.setGravity(false);
-        entity.setSilent(true);
-        entity.setPersistent(true);
-
-        // 显示手臂，去掉底座
-        entity.setArms(true);
-        entity.setBasePlate(false);
-
-        applyScale(entity, npc.getScale());
-
-        // 装备设置：确保头盔是玩家头颅
-        EntityEquipment eq = entity.getEquipment();
-        if (eq != null) {
-            ItemStack[] equipment = npc.getEquipment();
-
-            // 头盔：确保是玩家头颅
-            if (equipment[0] != null && equipment[0].getType() == Material.PLAYER_HEAD) {
-                eq.setHelmet(equipment[0], true);
-            } else {
-                // 如果头盔不是玩家头颅或为空，创建一个玩家头颅
-                ItemStack head = createPlayerHead(npc.getOwnerName());
-                eq.setHelmet(head, true);
-                // 同步回数据模型
-                equipment[0] = head;
-            }
-
-            // 胸甲：如果没有则给默认皮革装备
-            if (equipment[1] != null) {
-                eq.setChestplate(equipment[1], true);
-            } else {
-                ItemStack chest = createLeatherArmor(Material.LEATHER_CHESTPLATE, DEFAULT_LEATHER_COLOR);
-                eq.setChestplate(chest, true);
-                equipment[1] = chest;
-            }
-
-            // 护腿
-            if (equipment[2] != null) {
-                eq.setLeggings(equipment[2], true);
-            } else {
-                ItemStack legs = createLeatherArmor(Material.LEATHER_LEGGINGS, DEFAULT_LEATHER_COLOR);
-                eq.setLeggings(legs, true);
-                equipment[2] = legs;
-            }
-
-            // 靴子
-            if (equipment[3] != null) {
-                eq.setBoots(equipment[3], true);
-            } else {
-                ItemStack boots = createLeatherArmor(Material.LEATHER_BOOTS, DEFAULT_LEATHER_COLOR);
-                eq.setBoots(boots, true);
-                equipment[3] = boots;
-            }
-
-            // 主手
-            if (equipment[4] != null) {
-                eq.setItemInMainHand(equipment[4], true);
-            } else {
-                ItemStack hand = new ItemStack(Material.STICK);
-                eq.setItemInMainHand(hand, true);
-                equipment[4] = hand;
-            }
+        // 玩家形态：PacketEvents虚拟玩家实体，完整玩家模型
+        // 旧盔甲架时代的玩家头颅头盔不再需要（自带玩家头部）
+        ItemStack[] equipment = npc.getEquipment();
+        if (equipment[0] != null && equipment[0].getType() == Material.PLAYER_HEAD) {
+            equipment[0] = null;
         }
 
-        applyPose(entity, npc.getPose());
+        // 皮肤兜底：无皮肤数据且创建者在线时抓取
+        if (npc.getSkinValue() == null) {
+            Player owner = Bukkit.getPlayer(npc.getOwnerUuid());
+            if (owner != null) {
+                captureSkin(npc, owner);
+            }
+            // 离线服PlayerProfile不带纹理（客户端不上报皮肤），按名字从Mojang拉取
+            fetchSkinAsync(npc, npc.getOwnerName());
+        }
 
-        NamespacedKey key = PhilosNPCPlugin.npcIdKey();
-        entity.getPersistentDataContainer().set(key, PersistentDataType.STRING, npc.getId());
-        entityIdMap.put(entity.getEntityId(), npc.getId());
+        playerNpcSpawner.spawn(npc);
+    }
+
+    /**
+     * 从玩家捕获皮肤纹理
+     */
+    public void captureSkin(PhilosNPC npc, Player player) {
+        for (var prop : player.getPlayerProfile().getProperties()) {
+            if ("textures".equals(prop.getName())) {
+                npc.setSkinValue(prop.getValue());
+                npc.setSkinSignature(prop.getSignature());
+                return;
+            }
+        }
+    }
+
+    // 进行中的异步皮肤拉取（按npcId去重，避免区块加载反复触发）
+    private final java.util.Set<String> pendingSkinFetch = new java.util.HashSet<>();
+
+    /**
+     * 异步按玩家名从Mojang拉取皮肤（离线服PlayerProfile无纹理时的兜底）。
+     * 直接走Mojang公开API：名字→正版UUID→带签名的纹理属性。
+     * 拉取成功后保存数据并重建虚拟NPC外观。
+     */
+    public void fetchSkinAsync(PhilosNPC npc, String playerName) {
+        if (npc.getSkinValue() != null || playerName == null || playerName.isBlank()) return;
+        if (!pendingSkinFetch.add(npc.getId())) return;
+        String npcId = npc.getId();
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            String value = null;
+            String signature = null;
+            try {
+                String id = extractJsonString(
+                        httpGet("https://api.mojang.com/users/profiles/minecraft/"
+                                + java.net.URLEncoder.encode(playerName, java.nio.charset.StandardCharsets.UTF_8)),
+                        "id", 32);
+                if (id != null) {
+                    String texJson = httpGet("https://sessionserver.mojang.com/session/minecraft/profile/"
+                            + id + "?unsigned=false");
+                    value = extractJsonString(texJson, "value", 100);
+                    signature = extractJsonString(texJson, "signature", 100);
+                }
+            } catch (Throwable t) {
+                plugin.getLogger().warning("拉取玩家皮肤失败: " + playerName + " - " + t.getMessage());
+            }
+            if (value == null) {
+                plugin.getLogger().info("未能获取玩家 " + playerName
+                        + " 的正版皮肤（非正版账号名或网络不可达），NPC将保持默认皮肤");
+            }
+            final String v = value;
+            final String s = signature;
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                pendingSkinFetch.remove(npcId);
+                PhilosNPC current = npcs.get(npcId);
+                if (current == null || current.getSkinValue() != null || v == null) return;
+                current.setSkinValue(v);
+                current.setSkinSignature(s);
+                saveAll();
+                playerNpcSpawner.updateSkin(current);
+            });
+        });
+    }
+
+    /**
+     * 简易GET请求，失败或非200时返回null
+     */
+    private static String httpGet(String url) throws Exception {
+        java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(java.time.Duration.ofSeconds(5))
+                .build();
+        java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(url))
+                .header("User-Agent", "PhilosNPC")
+                .timeout(java.time.Duration.ofSeconds(5))
+                .GET()
+                .build();
+        java.net.http.HttpResponse<String> response = client.send(request,
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+        return response.statusCode() == 200 ? response.body() : null;
+    }
+
+    /**
+     * 从扁平JSON提取指定key的字符串值（要求长度下限，避免误匹配）
+     */
+    private static String extractJsonString(String json, String key, int minLength) {
+        if (json == null) return null;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("\"" + key + "\"\\s*:\\s*\"([^\"]{" + minLength + ",})\"")
+                .matcher(json);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private void spawnSystemNPC(PhilosNPC npc, Location loc, World world) {
         String typeName = npc.getEntityTypeName();
 
         if (typeName.startsWith("PLAYER:")) {
-            // 玩家型系统NPC：用ArmorStand + 指定玩家头颅 + 皮革身体
+            // 玩家型系统NPC：虚拟玩家实体，指定玩家名的皮肤（在线时抓取）
             String playerName = typeName.substring(7);
-            ArmorStand entity = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND, SpawnReason.CUSTOM);
-
-            entity.setCustomName(PhilosNPCPlugin.cc(npc.getDisplayName()));
-            entity.setCustomNameVisible(true);
-            entity.setInvulnerable(true);
-            entity.setGravity(false);
-            entity.setSilent(true);
-            entity.setPersistent(true);
-
-            // 显示手臂，去掉底座
-            entity.setArms(true);
-            entity.setBasePlate(false);
-
-            applyScale(entity, npc.getScale());
-
-            EntityEquipment eq = entity.getEquipment();
-            if (eq != null) {
-                ItemStack[] equipment = npc.getEquipment();
-                boolean hasChest = false, hasLeggings = false, hasBoots = false;
-
-                // 头盔：玩家头颅
-                if (equipment != null && equipment[0] != null && equipment[0].getType() == Material.PLAYER_HEAD) {
-                    eq.setHelmet(equipment[0], true);
-                } else {
-                    ItemStack skull = createPlayerHead(playerName);
-                    eq.setHelmet(skull, true);
-                    if (equipment != null) equipment[0] = skull;
-                }
-
-                if (equipment != null) {
-                    if (equipment[1] != null) { eq.setChestplate(equipment[1], true); hasChest = true; }
-                    if (equipment[2] != null) { eq.setLeggings(equipment[2], true); hasLeggings = true; }
-                    if (equipment[3] != null) { eq.setBoots(equipment[3], true); hasBoots = true; }
-                    if (equipment[4] != null) eq.setItemInMainHand(equipment[4], true);
-                }
-
-                // 默认皮革套装作为身体基础显示（深紫色系，系统NPC风格）
-                Color sysColor = Color.fromRGB(128, 0, 128); // 紫色
-                if (!hasChest) {
-                    eq.setChestplate(createLeatherArmor(Material.LEATHER_CHESTPLATE, sysColor), true);
-                }
-                if (!hasLeggings) {
-                    eq.setLeggings(createLeatherArmor(Material.LEATHER_LEGGINGS, sysColor), true);
-                }
-                if (!hasBoots) {
-                    eq.setBoots(createLeatherArmor(Material.LEATHER_BOOTS, sysColor), true);
-                }
-
-                // 主手默认物品
-                if (equipment == null || equipment[4] == null) {
-                    eq.setItemInMainHand(new ItemStack(Material.STICK), true);
-                }
+            ItemStack[] equipment = npc.getEquipment();
+            if (equipment != null && equipment[0] != null && equipment[0].getType() == Material.PLAYER_HEAD) {
+                equipment[0] = null;
             }
 
-            applyPose(entity, npc.getPose());
+            if (npc.getSkinValue() == null) {
+                Player target = Bukkit.getPlayerExact(playerName);
+                if (target != null) {
+                    captureSkin(npc, target);
+                }
+                // 离线服抓不到纹理时按名字从Mojang拉取
+                fetchSkinAsync(npc, playerName);
+            }
 
-            entity.getPersistentDataContainer().set(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING, npc.getId());
-            entityIdMap.put(entity.getEntityId(), npc.getId());
+            playerNpcSpawner.spawn(npc);
         } else {
             // 生物型系统NPC：生成实际生物实体
             try {
@@ -522,12 +604,14 @@ public class NPCManager {
                 }
 
                 entity.getPersistentDataContainer().set(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING, npc.getId());
-                entityIdMap.put(entity.getEntityId(), npc.getId());
+                registerEntity(entity, npc.getId());
             } catch (IllegalArgumentException e) {
                 plugin.getLogger().warning("无法创建系统NPC，未知实体类型: " + typeName);
             }
         }
     }
+
+    public PlayerNpcSpawner playerNpcSpawner() { return playerNpcSpawner; }
 
     // ===== 重新生成NPC以应用装备/外观变更 =====
 
@@ -537,7 +621,10 @@ public class NPCManager {
     }
 
     public void despawnNPC(PhilosNPC npc) {
-        // 找到对应的实体并移除
+        // 玩家形态NPC：销毁虚拟实体
+        playerNpcSpawner.despawn(npc);
+
+        // 找到对应的实体并移除（生物型）
         Iterator<Map.Entry<Integer, String>> iterator = entityIdMap.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<Integer, String> entry = iterator.next();
@@ -552,12 +639,30 @@ public class NPCManager {
                         }
                     }
                 }
+                headStates.remove(entityId);
+                entityRefs.remove(entityId);
                 iterator.remove();
             }
         }
     }
 
+    /**
+     * 移除世界中带NPC标记但未被本插件管理的实体（崩溃残留）。
+     */
+    private void cleanupOrphanEntities(String npcId) {
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntities()) {
+                String id = entity.getPersistentDataContainer()
+                        .get(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING);
+                if (npcId.equals(id) && !entityIdMap.containsKey(entity.getEntityId())) {
+                    entity.remove();
+                }
+            }
+        }
+    }
+
     public void despawnAll() {
+        playerNpcSpawner.despawnAll();
         for (World world : Bukkit.getWorlds()) {
             for (Entity entity : world.getEntities()) {
                 PersistentDataContainer pdc = entity.getPersistentDataContainer();
@@ -567,6 +672,8 @@ public class NPCManager {
             }
         }
         entityIdMap.clear();
+        headStates.clear();
+        entityRefs.clear();
     }
 
     // 重新生成指定区块内的NPC
@@ -604,166 +711,135 @@ public class NPCManager {
         }
     }
 
-    // ===== 头部动画 =====
-
-    public void startHeadAnimation() {
-        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            for (World world : Bukkit.getWorlds()) {
-                for (Entity entity : world.getEntities()) {
-                    PersistentDataContainer pdc = entity.getPersistentDataContainer();
-                    if (!pdc.has(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING)) continue;
-
-                    if (entity instanceof LivingEntity living) {
-                        float currentYaw = living.getLocation().getYaw();
-                        float delta = (float) (Math.random() * 10.0 - 5.0);
-                        float newYaw = currentYaw + delta;
-
-                        Location loc = living.getLocation();
-                        loc.setYaw(newYaw);
-                        living.teleport(loc);
-                    }
-                }
-            }
-        }, 20L, 20L);
-    }
-
-    // ===== 辅助方法 =====
+    // ===== 村民式头部动画 =====
 
     /**
-     * 应用姿势：通过盔甲架身体各部位的EulerAngle旋转实现视觉效果
+     * 单个NPC的头部动画状态
      */
-    private void applyPose(ArmorStand entity, NPCPose pose) {
-        switch (pose) {
-            case STANDING:
-                entity.setArms(true);
-                entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(EulerAngle.ZERO);
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-15), 0, Math.toRadians(10)));
-                entity.setLeftLegPose(EulerAngle.ZERO);
-                entity.setRightLegPose(EulerAngle.ZERO);
-                break;
-            case SNEAKING:
-                // 身体前倾 + 头部低垂 + 弯腿
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(Math.toRadians(30), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(25), 0, 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-60), 0, Math.toRadians(-8)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-65), 0, Math.toRadians(8)));
-                entity.setLeftLegPose(new EulerAngle(Math.toRadians(55), 0, Math.toRadians(-4)));
-                entity.setRightLegPose(new EulerAngle(Math.toRadians(55), 0, Math.toRadians(4)));
-                break;
-            case SITTING:
-                // 双腿前伸模拟坐姿
-                entity.setArms(true);
-                entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(EulerAngle.ZERO);
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-15), 0, Math.toRadians(10)));
-                entity.setLeftLegPose(new EulerAngle(Math.toRadians(-88), 0, Math.toRadians(12)));
-                entity.setRightLegPose(new EulerAngle(Math.toRadians(-88), 0, Math.toRadians(-12)));
-                break;
-            case LYING:
-                // 身体放平仰躺
-                entity.setArms(false);
-                entity.setBodyPose(new EulerAngle(Math.toRadians(90), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(20), 0, 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(15)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(165), 0, Math.toRadians(-15)));
-                entity.setLeftLegPose(new EulerAngle(Math.toRadians(15), 0, Math.toRadians(3)));
-                entity.setRightLegPose(new EulerAngle(Math.toRadians(15), 0, Math.toRadians(-3)));
-                break;
-            case DANCING:
-                // 双臂高举 + 扭腰
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(0, 0, Math.toRadians(-8)));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(-12), Math.toRadians(18), 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(160), 0, Math.toRadians(35)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(160), 0, Math.toRadians(-35)));
-                entity.setLeftLegPose(new EulerAngle(0, 0, Math.toRadians(8)));
-                entity.setRightLegPose(new EulerAngle(0, 0, Math.toRadians(-8)));
-                break;
-            case WAVE:
-                // 右臂高举过头挥动
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(0, 0, Math.toRadians(-5)));
-                entity.setHeadPose(new EulerAngle(0, 0, Math.toRadians(10)));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(170), 0, Math.toRadians(30)));
-                entity.setLeftLegPose(EulerAngle.ZERO);
-                entity.setRightLegPose(EulerAngle.ZERO);
-                break;
-            case ARMS_CROSSED:
-                // 双臂弯举交叉于胸前
-                entity.setArms(true);
-                entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(new EulerAngle(Math.toRadians(-5), Math.toRadians(10), 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-110), Math.toRadians(-25), Math.toRadians(-65)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-110), Math.toRadians(25), Math.toRadians(65)));
-                entity.setLeftLegPose(EulerAngle.ZERO);
-                entity.setRightLegPose(EulerAngle.ZERO);
-                break;
-            case THUMBS_UP:
-                // 右臂弯举到胸前点赞
-                entity.setArms(true);
-                entity.setBodyPose(EulerAngle.ZERO);
-                entity.setHeadPose(new EulerAngle(Math.toRadians(10), Math.toRadians(-8), 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-120), Math.toRadians(-15), Math.toRadians(-30)));
-                entity.setLeftLegPose(EulerAngle.ZERO);
-                entity.setRightLegPose(EulerAngle.ZERO);
-                break;
-            case BOWING:
-                // 身体前倾鞠躬
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(Math.toRadians(55), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(25), 0, 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(-6)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(6)));
-                entity.setLeftLegPose(EulerAngle.ZERO);
-                entity.setRightLegPose(EulerAngle.ZERO);
-                break;
-            case SUPERMAN:
-                // 身体前倾 + 双臂前伸
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(Math.toRadians(75), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(-20), 0, 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-170), 0, Math.toRadians(-8)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-170), 0, Math.toRadians(8)));
-                entity.setLeftLegPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(-4)));
-                entity.setRightLegPose(new EulerAngle(Math.toRadians(-5), 0, Math.toRadians(4)));
-                break;
-            case POINTING:
-                // 右臂前平举指向远方
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(0, Math.toRadians(-8), 0));
-                entity.setHeadPose(new EulerAngle(0, Math.toRadians(12), 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-90), 0, 0));
-                entity.setLeftLegPose(EulerAngle.ZERO);
-                entity.setRightLegPose(EulerAngle.ZERO);
-                break;
-            case MEDITATION:
-                // 双腿叠起近似盘腿 + 双手搭膝 + 低头
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(Math.toRadians(5), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(18), 0, 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-40), 0, Math.toRadians(-25)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-40), 0, Math.toRadians(25)));
-                entity.setLeftLegPose(new EulerAngle(Math.toRadians(-85), 0, Math.toRadians(25)));
-                entity.setRightLegPose(new EulerAngle(Math.toRadians(-85), 0, Math.toRadians(-25)));
-                break;
-            case FACEPALM:
-                // 右手扶额 + 低头驼背
-                entity.setArms(true);
-                entity.setBodyPose(new EulerAngle(Math.toRadians(8), 0, 0));
-                entity.setHeadPose(new EulerAngle(Math.toRadians(25), Math.toRadians(-8), 0));
-                entity.setLeftArmPose(new EulerAngle(Math.toRadians(-10), 0, Math.toRadians(-10)));
-                entity.setRightArmPose(new EulerAngle(Math.toRadians(-150), Math.toRadians(-15), Math.toRadians(-25)));
-                entity.setLeftLegPose(EulerAngle.ZERO);
-                entity.setRightLegPose(EulerAngle.ZERO);
-                break;
+    private static class HeadState {
+        double yawOff = 0;      // 当前头部偏航偏移
+        double pitchOff = 0;    // 当前俯仰偏移
+        double targetYawOff = 0;
+        double targetPitchOff = 0;
+        int idleCooldown = 0;   // 闲置随机张望的间隔
+        long nextSense = 0;     // 下次感知玩家的tick
+    }
+
+    /**
+     * 启动村民式头部动画：
+     * - 附近有玩家时平滑转头看向玩家（含抬头低头）
+     * - 无玩家时偶尔随机张望
+     * - 头部偏转超过阈值时身体缓慢转向，像村民转身
+     */
+    public void startHeadAnimation() {
+        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            long tick = Bukkit.getCurrentTick();
+            for (Map.Entry<Integer, String> entry : entityIdMap.entrySet()) {
+                Entity entity = entityRefs.get(entry.getKey());
+                if (!(entity instanceof LivingEntity living) || !living.isValid()) continue;
+                PhilosNPC npc = npcs.get(entry.getValue());
+                if (npc == null) continue;
+
+                HeadState st = headStates.computeIfAbsent(entry.getKey(), k -> new HeadState());
+
+                if (tick >= st.nextSense) {
+                    st.nextSense = tick + 5;
+                    updateLookTarget(living, st);
+                }
+                animateHead(living, st);
+            }
+            // 清理已消失实体的状态
+            headStates.keySet().removeIf(id -> {
+                Entity e = entityRefs.get(id);
+                return e == null || !e.isValid();
+            });
+        }, 20L, 1L);
+    }
+
+    private final Random animRandom = new Random();
+
+    /**
+     * 更新注视目标：5格内最近玩家优先；否则进入闲置随机张望
+     */
+    private void updateLookTarget(LivingEntity living, HeadState st) {
+        Location eye = living.getEyeLocation();
+        Player nearest = null;
+        double best = 25.0; // 5格距离的平方
+
+        for (Entity nearby : living.getNearbyEntities(5, 4, 5)) {
+            if (nearby instanceof Player p && !p.isDead()
+                    && p.getGameMode() != org.bukkit.GameMode.SPECTATOR) {
+                double dist = p.getLocation().distanceSquared(eye);
+                if (dist < best) {
+                    best = dist;
+                    nearest = p;
+                }
+            }
         }
+
+        if (nearest != null) {
+            org.bukkit.util.Vector toPlayer = nearest.getEyeLocation().toVector().subtract(eye.toVector());
+            double targetYaw = Math.toDegrees(Math.atan2(-toPlayer.getX(), toPlayer.getZ()));
+            double horizontal = Math.sqrt(toPlayer.getX() * toPlayer.getX() + toPlayer.getZ() * toPlayer.getZ());
+            double targetPitch = -Math.toDegrees(Math.atan2(toPlayer.getY(), horizontal));
+
+            double yawDiff = wrapDegrees(targetYaw - living.getLocation().getYaw());
+            st.targetYawOff = Math.toRadians(clamp(yawDiff, -75, 75));
+            st.targetPitchOff = Math.toRadians(clamp(targetPitch, -40, 40));
+        } else if (st.idleCooldown <= 0) {
+            // 闲置：3~8秒随机看一个方向
+            st.idleCooldown = 60 + animRandom.nextInt(140);
+            st.targetYawOff = (animRandom.nextDouble() - 0.5) * Math.toRadians(60);
+            st.targetPitchOff = (animRandom.nextDouble() - 0.5) * Math.toRadians(16);
+        }
+    }
+
+    /**
+     * 每tick插值执行转头；头部偏转过大时身体跟随转向
+     */
+    private void animateHead(LivingEntity living, HeadState st) {
+        if (st.idleCooldown > 0) st.idleCooldown--;
+
+        double maxStep = Math.toRadians(5.0); // 每tick最多5度，平滑转头
+        st.yawOff = approach(st.yawOff, st.targetYawOff, maxStep);
+        st.pitchOff = approach(st.pitchOff, st.targetPitchOff, maxStep * 0.8);
+
+        if (living instanceof ArmorStand stand) {
+            // 头偏超过55度时身体慢慢转过去，头相对回中
+            double yawOffDeg = Math.toDegrees(st.yawOff);
+            if (Math.abs(yawOffDeg) > 55) {
+                double turn = Math.signum(yawOffDeg) * 2.5;
+                living.setRotation((float) (living.getLocation().getYaw() + turn), 0);
+                st.yawOff = Math.toRadians(yawOffDeg - turn);
+            }
+            stand.setHeadPose(new EulerAngle(st.pitchOff, st.yawOff, 0));
+        } else {
+            // 非盔甲架生物NPC：头身一体，整体朝向插值转向玩家
+            double yawOffDeg = Math.toDegrees(st.targetYawOff);
+            if (Math.abs(yawOffDeg) > 1.0) {
+                double step = clamp(yawOffDeg, -4, 4);
+                living.setRotation((float) (living.getLocation().getYaw() + step), 0);
+                st.targetYawOff = Math.toRadians(yawOffDeg - step);
+                st.yawOff = st.targetYawOff;
+            }
+        }
+    }
+
+    private static double approach(double current, double target, double maxStep) {
+        double diff = target - current;
+        if (Math.abs(diff) <= maxStep) return target;
+        return current + Math.signum(diff) * maxStep;
+    }
+
+    private static double wrapDegrees(double angle) {
+        angle %= 360.0;
+        if (angle > 180.0) angle -= 360.0;
+        if (angle < -180.0) angle += 360.0;
+        return angle;
+    }
+
+    private static double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     /**
@@ -774,31 +850,5 @@ public class NPCManager {
         if (attr != null) {
             attr.setBaseValue(Math.max(0.0625, Math.min(16.0, scale)));
         }
-    }
-
-    /**
-     * 创建玩家头颅物品
-     */
-    private ItemStack createPlayerHead(String playerName) {
-        ItemStack head = new ItemStack(Material.PLAYER_HEAD);
-        SkullMeta meta = (SkullMeta) head.getItemMeta();
-        if (meta != null) {
-            meta.setOwner(playerName);
-            head.setItemMeta(meta);
-        }
-        return head;
-    }
-
-    /**
-     * 创建染色皮革装备
-     */
-    private ItemStack createLeatherArmor(Material material, Color color) {
-        ItemStack item = new ItemStack(material);
-        LeatherArmorMeta meta = (LeatherArmorMeta) item.getItemMeta();
-        if (meta != null) {
-            meta.setColor(color);
-            item.setItemMeta(meta);
-        }
-        return item;
     }
 }
