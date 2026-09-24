@@ -231,19 +231,7 @@ public class NPCManager {
         // 玩家形态：捕获创建者皮肤（含签名，正版/离线服均可用）
         captureSkin(npc, player);
 
-        // 装备：复制创建者身上的装备（盔甲+主手），无则留空（玩家模型自带身体）
-        ItemStack[] npcEquip = npc.getEquipment();
-        ItemStack[] playerEquip = player.getEquipment().getArmorContents();
-        // playerEquip顺序: 0=靴子, 1=护腿, 2=胸甲, 3=头盔
-        // npcEquip顺序: 0=头盔, 1=胸甲, 2=护腿, 3=靴子, 4=主手
-        if (playerEquip[3] != null && playerEquip[3].getType() != Material.AIR) npcEquip[0] = playerEquip[3].clone();
-        if (playerEquip[2] != null && playerEquip[2].getType() != Material.AIR) npcEquip[1] = playerEquip[2].clone();
-        if (playerEquip[1] != null && playerEquip[1].getType() != Material.AIR) npcEquip[2] = playerEquip[1].clone();
-        if (playerEquip[0] != null && playerEquip[0].getType() != Material.AIR) npcEquip[3] = playerEquip[0].clone();
-        if (player.getEquipment().getItemInMainHand() != null
-                && player.getEquipment().getItemInMainHand().getType() != Material.AIR) {
-            npcEquip[4] = player.getEquipment().getItemInMainHand().clone();
-        }
+        // 装备默认留空（玩家模型自带身体），可通过装备编辑界面手动穿戴
 
         // 同步共享商店背包到新NPC
         ItemStack[] sharedInv = getSharedShopInventory(player.getUniqueId());
