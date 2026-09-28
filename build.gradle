@@ -1,36 +1,50 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id 'java'
     id 'com.gradleup.shadow' version '9.0.0-beta12'
 }
 
-group = 'com.phcraft'
-version = '1.3.0'
+def pluginConfig = new JsonSlurper().parse(file('plugin.json'))
+group = pluginConfig.group
+version = pluginConfig.version
 
 repositories {
     mavenCentral()
-    maven {
-        name = 'papermc'
-        url = 'https://repo.papermc.io/repository/maven-public/'
-    }
-    maven {
-        name = 'jitpack'
-        url = 'https://jitpack.io'
-    }
-    maven {
-        name = 'codemc'
-        url = 'https://repo.codemc.io/repository/maven-releases/'
-    }
+    maven { url = uri('https://repo.papermc.io/repository/maven-public/') }
+    maven { url = uri('https://jitpack.io') }
+    maven { url = uri('https://repo.codemc.io/repository/maven-releases/') }
 }
 
 dependencies {
-    compileOnly 'io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT'
+    compileOnly "io.papermc.paper:paper-api:${pluginConfig.paperVersion}"
+    // Vault 经济 API；排除其内嵌的旧版 bukkit，避免与 paper-api 冲突
     compileOnly('com.github.MilkBowl:VaultAPI:1.7') {
         exclude group: 'org.bukkit', module: 'bukkit'
     }
+    // packetevents 打包进 JAR 并重定位，避免与其他插件自带版本冲突
     implementation 'com.github.retrooper:packetevents-spigot:2.13.0'
 }
 
+java {
+    sourceCompatibility = JavaVersion.toVersion(pluginConfig.javaVersion)
+    targetCompatibility = JavaVersion.toVersion(pluginConfig.javaVersion)
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = pluginConfig.javaVersion
+}
+
+processResources {
+    def values = [pluginName: pluginConfig.pluginName, version: project.version,
+                  apiVersion: pluginConfig.apiVersion]
+    inputs.properties(values)
+    filesMatching('plugin.yml') { expand(values) }
+}
+
 shadowJar {
+    archiveBaseName = pluginConfig.pluginName
     archiveClassifier = ''
     relocate 'com.github.retrooper', 'com.phcraft.philosnpc.libs.packetevents.api'
     relocate 'io.github.retrooper', 'com.phcraft.philosnpc.libs.packetevents.spigot'
@@ -39,27 +53,11 @@ shadowJar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// 禁用普通jar：与shadowJar同名输出会互相覆盖
+// 禁用普通jar：与 shadowJar 同名输出会互相覆盖
 tasks.jar {
     enabled = false
 }
+
 tasks.assemble {
     dependsOn tasks.shadowJar
-}
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-}
-
-tasks.processResources {
-    inputs.property 'version', project.version
-    filesMatching('plugin.yml') {
-        expand 'version': project.version
-    }
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
-    options.release = 21
 }

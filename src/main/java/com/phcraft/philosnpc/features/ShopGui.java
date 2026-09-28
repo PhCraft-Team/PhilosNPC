@@ -21,8 +21,9 @@ public class ShopGui {
     public static Inventory shopInventoryGui(PhilosNPC npc, InventoryHolder holder) {
         Inventory inv = Bukkit.createInventory(holder, 45, PhilosNPCPlugin.cc("&b&l商店背包（共享）"));
 
-        // 前36格：商店背包物品（从共享背包中读取）
-        ItemStack[] shopInv = PhilosNPCPlugin.instance().npcManager().getSharedShopInventory(npc.getOwnerUuid());
+        // 前36格：商店背包物品（从共享背包中读取，按NPC所在世界隔离）
+        ItemStack[] shopInv = PhilosNPCPlugin.instance().npcManager()
+                .getSharedShopInventory(npc.getOwnerUuid(), npc.getWorldName());
         for (int i = 0; i < 36 && i < shopInv.length; i++) {
             if (shopInv[i] != null) {
                 inv.setItem(i, shopInv[i].clone());
@@ -212,7 +213,7 @@ public class ShopGui {
      */
     public static Inventory collectionBackpackGui(PhilosNPC npc, int page, InventoryHolder holder) {
         List<ItemStack> backpack = PhilosNPCPlugin.instance().npcManager()
-                .getCollectionBackpack(npc.getOwnerUuid());
+                .getCollectionBackpack(npc.getOwnerUuid(), npc.getWorldName());
 
         int itemsPerPage = 45;
         int totalPages = Math.max(1, (backpack.size() + itemsPerPage - 1) / itemsPerPage);

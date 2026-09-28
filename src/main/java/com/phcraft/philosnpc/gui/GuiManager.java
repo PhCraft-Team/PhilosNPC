@@ -10,6 +10,7 @@ import com.phcraft.philosnpc.features.MessageFeature;
 import com.phcraft.philosnpc.features.ShopGui;
 import com.phcraft.philosnpc.features.ShopTrade;
 import com.phcraft.philosnpc.features.TeleportFeature;
+import com.phcraft.philosnpc.features.TransferGui;
 import com.phcraft.philosnpc.features.UsageNotify;
 import com.phcraft.philosnpc.npc.FeatureType;
 import com.phcraft.philosnpc.npc.NPCManager;
@@ -175,6 +176,7 @@ public class GuiManager implements Listener {
     public void openCollectionBackpackGui(Player player, PhilosNPC npc, int page) {
         Map<String, Object> data = new HashMap<>();
         data.put("ownerUuid", npc.getOwnerUuid().toString());
+        data.put("worldName", npc.getWorldName());
         GuiState state = new GuiState(GuiState.Screen.COLLECTION_BACKPACK, npc.getId(), page, data);
         Inventory inv = ShopGui.collectionBackpackGui(npc, page, state);
         state.setInventory(inv);
@@ -216,9 +218,13 @@ public class GuiManager implements Listener {
      */
     private void handleRetrieveAllCollection(Player player, PhilosNPC npc, GuiState state) {
         UUID owner = resolveOwnerUuid(state, npc);
-        if (owner == null) return;
+        String world = resolveWorldName(state, npc);
+        if (owner == null || world == null) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c无法确定收购背包所属世界，取回失败"));
+            return;
+        }
 
-        List<ItemStack> items = npcManager.clearCollectionBackpack(owner);
+        List<ItemStack> items = npcManager.clearCollectionBackpack(owner, world);
         if (items.isEmpty()) {
             player.sendMessage(PhilosNPCPlugin.cc("&c收购背包是空的"));
             return;
@@ -250,6 +256,104 @@ public class GuiManager implements Listener {
             }
         }
         return npc != null ? npc.getOwnerUuid() : null;
+    }
+
+    /**
+     * 从GuiState解析收购背包所属世界（NPC被删除/移动后仍取回原世界侧背包）
+     */
+    private String resolveWorldName(GuiState state, PhilosNPC npc) {
+        Object stored = state.getData().get("worldName");
+        if (stored instanceof String s && !s.isBlank()) return s;
+        return npc != null ? npc.getWorldName() : null;
+    }
+
+    // ===== 跨世界转移仓库界面 =====
+
+    /**
+     * 打开转移仓库界面（仓库按玩家全局共享，跨世界通用）
+     */
+    public void openTransferVaultGui(Player player, PhilosNPC npc, int page) {
+        if (npc == null) {
+            player.closeInventory();
+            return;
+        }
+        int size = npcManager.getTransferVault(player.getUniqueId()).size();
+        int totalPages = Math.max(1, (size + TransferGui.ITEMS_PER_PAGE - 1) / TransferGui.ITEMS_PER_PAGE);
+        if (page >= totalPages) page = totalPages - 1;
+        if (page < 0) page = 0;
+
+        GuiState state = new GuiState(GuiState.Screen.TRANSFER_VAULT, npc.getId(), page, new HashMap<>());
+        Inventory inv = TransferGui.transferVaultGui(player.getUniqueId(), page, state);
+        state.setInventory(inv);
+        player.openInventory(inv);
+    }
+
+    /**
+     * 转移仓库点击处理：
+     * 光标持白名单物品点击仓库区=存入 / 空手点击物品=取出该组
+     * 45上一页 / 49一键取回 / 51下一页 / 53返回
+     */
+    private void handleTransferVaultClick(Player player, PhilosNPC npc, int slot, GuiState state, InventoryClickEvent event) {
+        UUID uuid = player.getUniqueId();
+        int page = state.getPage();
+
+        switch (slot) {
+            case 45: // 上一页
+                openTransferVaultGui(player, npc, Math.max(0, page - 1));
+                return;
+            case 49: { // 一键取回
+                List<ItemStack> items = npcManager.clearTransferVault(uuid);
+                if (items.isEmpty()) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c转移仓库是空的"));
+                    return;
+                }
+                int stacks = 0;
+                for (ItemStack item : items) {
+                    if (item == null || item.getType().isAir()) continue;
+                    giveResult(player, item);
+                    stacks++;
+                }
+                npcManager.saveAll();
+                player.sendMessage(PhilosNPCPlugin.cc("&a已取回 &f" + stacks + " &a组物品，超出背包容量的已掉落在脚下"));
+                player.playSound(player.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1f, 1f);
+                openTransferVaultGui(player, npc, 0);
+                return;
+            }
+            case 51: // 下一页
+                openTransferVaultGui(player, npc, page + 1);
+                return;
+            case 53: // 返回功能界面
+                openCustomerGui(player, npc);
+                return;
+        }
+
+        if (slot < 0 || slot >= TransferGui.ITEMS_PER_PAGE) return;
+
+        // 光标持有物品：点击仓库区任意槽位 = 尝试存入
+        ItemStack cursor = event.getCursor();
+        if (cursor != null && !cursor.getType().isAir()) {
+            if (npcManager.isTransferAllowed(cursor)) {
+                npcManager.addItemToTransferVault(uuid, cursor.clone());
+                event.setCursor(new ItemStack(Material.AIR));
+                npcManager.saveAll();
+                player.playSound(player.getLocation(), Sound.BLOCK_ENDER_CHEST_OPEN, 0.8f, 1.4f);
+                player.sendMessage(PhilosNPCPlugin.cc("&a已存入转移仓库，任何世界的转移NPC都可取回"));
+                openTransferVaultGui(player, npc, page);
+            } else {
+                player.sendMessage(PhilosNPCPlugin.cc("&c该物品不在跨世界转移白名单内"));
+                player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
+            }
+            return;
+        }
+
+        // 空手点击仓库物品：取出该组
+        ItemStack taken = npcManager.takeTransferItemAt(uuid, page * TransferGui.ITEMS_PER_PAGE + slot);
+        if (taken != null) {
+            giveResult(player, taken);
+            npcManager.saveAll();
+            player.playSound(player.getLocation(), Sound.BLOCK_ENDER_CHEST_CLOSE, 0.8f, 1.2f);
+            openTransferVaultGui(player, npc, page);
+        }
     }
 
     public void openTpSettingsGui(Player player, PhilosNPC npc) {
@@ -559,7 +663,7 @@ public class GuiManager implements Listener {
                     boolean selfPurchase = !isSystem && player.getUniqueId().equals(ownerUuid);
                     // 个人NPC：先检查共享商店背包库存
                     if (!isSystem) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid);
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.npc.getWorldName());
                         if (!hasEnoughInArray(shopInv, trade.getResult())) {
                             player.sendMessage(PhilosNPCPlugin.cc("&c商店库存不足"));
                             player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
@@ -582,9 +686,9 @@ public class GuiManager implements Listener {
                     }
                     // 个人NPC：从共享商店背包扣除产出
                     if (!isSystem) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid);
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.npc.getWorldName());
                         removeFromArray(shopInv, trade.getResult());
-                        npcManager.setSharedShopInventory(ownerUuid, shopInv);
+                        npcManager.setSharedShopInventory(ownerUuid, session.npc.getWorldName(), shopInv);
                     }
                     giveResult(player, trade.getResult().clone());
                     trade.incrementUses();
@@ -613,7 +717,7 @@ public class GuiManager implements Listener {
 
                     // 个人NPC：检查共享商店背包库存
                     if (!session.npc.isSystem()) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid());
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid(), session.npc.getWorldName());
                         if (!hasEnoughInArray(shopInv, trade.getResult())) {
                             player.sendMessage(PhilosNPCPlugin.cc("&c商店库存不足"));
                             player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
@@ -629,13 +733,13 @@ public class GuiManager implements Listener {
                     // 个人NPC：价格物品存入店主的收购背包，产出从共享商店背包扣除
                     if (!session.npc.isSystem()) {
                         UUID ownerUuid = session.npc.getOwnerUuid();
-                        npcManager.addItemToCollectionBackpack(ownerUuid, trade.getPrice1().clone());
+                        npcManager.addItemToCollectionBackpack(ownerUuid, session.npc.getWorldName(), trade.getPrice1().clone());
                         if (trade.getPrice2() != null) {
-                            npcManager.addItemToCollectionBackpack(ownerUuid, trade.getPrice2().clone());
+                            npcManager.addItemToCollectionBackpack(ownerUuid, session.npc.getWorldName(), trade.getPrice2().clone());
                         }
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid);
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.npc.getWorldName());
                         removeFromArray(shopInv, trade.getResult());
-                        npcManager.setSharedShopInventory(ownerUuid, shopInv);
+                        npcManager.setSharedShopInventory(ownerUuid, session.npc.getWorldName(), shopInv);
                     }
                     trade.incrementUses();
                     npcManager.saveAll();
@@ -669,6 +773,25 @@ public class GuiManager implements Listener {
         // 玩家自己的背包：普通左右键放行（放入编辑槽的前提）
         if (!isTop && normalClick && rawSlot >= 0) {
             event.setCancelled(false);
+            return;
+        }
+
+        // 转移仓库界面：玩家背包shift点击白名单物品 = 直接入仓
+        if (!isTop && state.getScreen() == GuiState.Screen.TRANSFER_VAULT
+                && (click == ClickType.SHIFT_LEFT || click == ClickType.SHIFT_RIGHT)
+                && event.getClickedInventory() != null) {
+            ItemStack current = event.getCurrentItem();
+            if (current != null && !current.getType().isAir()) {
+                if (npcManager.isTransferAllowed(current)) {
+                    event.getClickedInventory().setItem(event.getSlot(), null);
+                    npcManager.addItemToTransferVault(player.getUniqueId(), current);
+                    npcManager.saveAll();
+                    player.playSound(player.getLocation(), Sound.BLOCK_ENDER_CHEST_OPEN, 0.8f, 1.4f);
+                    player.sendMessage(PhilosNPCPlugin.cc("&a已存入转移仓库，任何世界的转移NPC都可取回"));
+                } else {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c该物品不在跨世界转移白名单内"));
+                }
+            }
             return;
         }
 
@@ -738,6 +861,9 @@ public class GuiManager implements Listener {
                     break;
                 case COLLECTION_BACKPACK:
                     handleCollectionBackpackClick(player, npc, slot, state);
+                    break;
+                case TRANSFER_VAULT:
+                    handleTransferVaultClick(player, npc, slot, state, event);
                     break;
             }
         }
@@ -900,7 +1026,7 @@ public class GuiManager implements Listener {
                         for (int i = 0; i < 36; i++) {
                             items[i] = topInv.getItem(i);
                         }
-                        npcManager.setSharedShopInventory(npc.getOwnerUuid(), items);
+                        npcManager.setSharedShopInventory(npc.getOwnerUuid(), npc.getWorldName(), items);
                         npcManager.saveAll();
                     }
                 } else {
@@ -1023,6 +1149,11 @@ public class GuiManager implements Listener {
                 case GIFT_PACK:
                     openGiftPackListGui(player, npc, 0);
                     break;
+                case TRANSFER:
+                    // 白名单由 config.yml 控制，无需在界面内设置
+                    player.sendMessage(PhilosNPCPlugin.cc(
+                            "&7跨世界转移白名单在 config.yml 的 transfer.allowed-rpgforge-ids 配置，修改后 /pnpc reload 生效"));
+                    break;
             }
         } else {
             // 空槽位 - 打开功能选择界面
@@ -1053,9 +1184,10 @@ public class GuiManager implements Listener {
 
         if (featureIndex >= 0 && featureIndex < features.length) {
             FeatureType feature = features[featureIndex];
-            // 礼包功能仅系统NPC可添加
-            if (feature == FeatureType.GIFT_PACK && !npc.isSystem()) {
-                player.sendMessage(PhilosNPCPlugin.cc("&c礼包功能仅系统NPC可添加"));
+            // 礼包与跨世界转移功能仅系统NPC可添加
+            boolean systemOnly = feature == FeatureType.GIFT_PACK || feature == FeatureType.TRANSFER;
+            if (systemOnly && !npc.isSystem()) {
+                player.sendMessage(PhilosNPCPlugin.cc("&c" + feature.displayName() + "功能仅系统NPC可添加"));
                 player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
                 openMainGui(player, npc);
                 return;
@@ -1444,6 +1576,9 @@ public class GuiManager implements Listener {
                 }
                 case GIFT_PACK -> {
                     openGiftPackClaimGui(player, npc, 0);
+                }
+                case TRANSFER -> {
+                    openTransferVaultGui(player, npc, 0);
                 }
             }
         }
@@ -1892,7 +2027,8 @@ public class GuiManager implements Listener {
             GIFT_PACK_EDIT,
             GIFT_PACK_CONTAINER,
             GIFT_PACK_CLAIM,
-            COLLECTION_BACKPACK
+            COLLECTION_BACKPACK,
+            TRANSFER_VAULT
         }
 
         private final Screen screen;

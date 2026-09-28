@@ -17,6 +17,8 @@ public class PhilosNPC {
     private String ownerName;
     private UUID ownerUuid;
     private Location location;
+    // NPC 所在世界名（从存档记录，世界未加载时 getLocation().getWorld() 为 null，仍可键控）
+    private String worldName;
     private NPCPose pose;
     private double scale;
     private List<FeatureType> features;
@@ -90,7 +92,18 @@ public class PhilosNPC {
     public void setOwnerUuid(UUID ownerUuid) { this.ownerUuid = ownerUuid; }
 
     public Location getLocation() { return location; }
-    public void setLocation(Location location) { this.location = location; }
+    public void setLocation(Location location) {
+        this.location = location;
+        if (location != null && location.getWorld() != null) {
+            this.worldName = location.getWorld().getName();
+        }
+    }
+
+    /** NPC 所在世界名：优先实时 World，世界未加载时回退到存档记录 */
+    public String getWorldName() {
+        if (location != null && location.getWorld() != null) return location.getWorld().getName();
+        return worldName != null ? worldName : "world";
+    }
 
     public NPCPose getPose() { return pose; }
     public void setPose(NPCPose pose) { this.pose = pose; }
@@ -260,6 +273,11 @@ public class PhilosNPC {
         npc.ownerName = (String) map.get("ownerName");
         npc.ownerUuid = UUID.fromString((String) map.get("ownerUuid"));
         npc.location = deserializeLocation((Map<String, Object>) map.get("location"));
+        // 记录存档中的世界名（世界未加载时 getWorld() 为 null，靠它做世界键控）
+        Map<String, Object> locMap = (Map<String, Object>) map.get("location");
+        if (locMap != null && locMap.get("world") instanceof String w) {
+            npc.worldName = w;
+        }
         npc.pose = NPCPose.parse((String) map.get("pose"));
         npc.scale = ((Number) map.get("scale")).doubleValue();
         npc.skinValue = (String) map.get("skinValue");
