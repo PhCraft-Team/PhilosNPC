@@ -34,11 +34,15 @@ public class NPCManager {
     private final PhilosNPCPlugin plugin;
     private final Map<String, PhilosNPC> npcs;
     private final Map<Integer, String> entityIdMap;
-    private final Map<UUID, ItemStack[]> sharedShopInventories;
+    // 共享商店背包：键 = 玩家UUID|世界名（同玩家同世界的NPC共享，跨世界隔离，防止跨世界走私物品）
+    private final Map<String, ItemStack[]> sharedShopInventories;
     private final File dataFile;
-    // 收购背包（物物交易收入）：按玩家UUID共享，独立文件存储，无限容量
-    private final Map<UUID, List<ItemStack>> collectionBackpacks;
+    // 收购背包（物物交易收入）：键 = 玩家UUID|世界名，同玩家同世界共享，无限容量
+    private final Map<String, List<ItemStack>> collectionBackpacks;
     private final File backpackFile;
+    // 跨世界转移仓库：按玩家UUID（天生跨世界），只存白名单物品，独立文件存储
+    private final Map<UUID, List<ItemStack>> transferVaults;
+    private final File transferFile;
     // 村民式头部动画状态（entityId -> 状态）
     private final Map<Integer, HeadState> headStates = new HashMap<>();
     // 已生成NPC的实体引用（entityId -> 实体），供动画循环快速访问
@@ -59,56 +63,62 @@ public class NPCManager {
         this.dataFile = new File(plugin.getDataFolder(), "npcs.yml");
         this.collectionBackpacks = new HashMap<>();
         this.backpackFile = new File(plugin.getDataFolder(), "collection_backpacks.yml");
+        this.transferVaults = new HashMap<>();
+        this.transferFile = new File(plugin.getDataFolder(), "transfer_vaults.yml");
+    }
+
+    /** 世界隔离存储键：玩家UUID|世界名 */
+    static String scopeKey(UUID ownerUuid, String worldName) {
+        return ownerUuid + "|" + (worldName == null ? "world" : worldName);
     }
 
     // ===== 加载 / 保存 =====
 
     @SuppressWarnings("unchecked")
     public void loadAll() {
-        // 加载收购背包（独立文件，与NPC数据无关）
-        loadCollectionBackpacks();
-
         if (!dataFile.exists()) {
             plugin.saveResource("npcs.yml", false);
         }
 
         FileConfiguration config = YamlConfiguration.loadConfiguration(dataFile);
-        if (!config.contains("npcs")) {
-            return;
-        }
+        if (config.contains("npcs")) {
+            List<Map<?, ?>> npcList = config.getMapList("npcs");
+            for (Map<?, ?> rawMap : npcList) {
+                Map<String, Object> map = (Map<String, Object>) rawMap;
+                PhilosNPC npc = PhilosNPC.fromMap(map);
+                npcs.put(npc.getId(), npc);
 
-        List<Map<?, ?>> npcList = config.getMapList("npcs");
-        for (Map<?, ?> rawMap : npcList) {
-            Map<String, Object> map = (Map<String, Object>) rawMap;
-            PhilosNPC npc = PhilosNPC.fromMap(map);
-            npcs.put(npc.getId(), npc);
-
-            // 如果所在区块已加载，则生成实体
-            Location loc = npc.getLocation();
-            if (loc != null && loc.getWorld() != null && loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
-                spawnNPC(npc);
+                // 如果所在区块已加载，则生成实体
+                Location loc = npc.getLocation();
+                if (loc != null && loc.getWorld() != null && loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
+                    spawnNPC(npc);
+                }
             }
         }
 
-        // 初始化共享商店背包（按玩家UUID汇总）
+        // 加载收购背包（NPC数据之后：旧格式迁移需要按该玩家NPC所在世界归并）
+        loadCollectionBackpacks();
+        loadTransferVaults();
+
+        // 初始化共享商店背包（按 玩家|世界 分组：同玩家同世界的NPC共享一份）
         for (PhilosNPC npc : npcs.values()) {
             UUID ownerUuid = npc.getOwnerUuid();
-            if (!sharedShopInventories.containsKey(ownerUuid)) {
-                // 以第一个找到的NPC的商店背包作为共享背包
-                sharedShopInventories.put(ownerUuid, npc.getShopInventory().clone());
+            String key = scopeKey(ownerUuid, npc.getWorldName());
+            if (!sharedShopInventories.containsKey(key)) {
+                // 以该世界内第一个找到的NPC商店背包作为该世界侧共享背包
+                sharedShopInventories.put(key, npc.getShopInventory().clone());
             }
-            // 同步共享背包到该NPC（确保所有NPC数据一致）
-            npc.setShopInventory(sharedShopInventories.get(ownerUuid));
+            // 同步共享背包到该NPC（确保同世界所有NPC数据一致）
+            npc.setShopInventory(sharedShopInventories.get(key));
         }
 
         plugin.getLogger().info("已加载 " + npcs.size() + " 个NPC");
     }
 
     public void saveAll() {
-        // 保存前，将共享商店背包同步到所有NPC
+        // 保存前，将共享商店背包同步到所有NPC（按各自所在世界取对应侧）
         for (PhilosNPC npc : npcs.values()) {
-            UUID ownerUuid = npc.getOwnerUuid();
-            ItemStack[] sharedInv = sharedShopInventories.get(ownerUuid);
+            ItemStack[] sharedInv = sharedShopInventories.get(scopeKey(npc.getOwnerUuid(), npc.getWorldName()));
             if (sharedInv != null) {
                 npc.setShopInventory(sharedInv.clone());
             }
@@ -128,24 +138,25 @@ public class NPCManager {
         }
 
         saveCollectionBackpacks();
+        saveTransferVaults();
     }
 
-    // ===== 收购背包（物物交易收入，按玩家共享） =====
+    // ===== 收购背包（物物交易收入，同玩家同世界共享，跨世界隔离） =====
 
     /**
-     * 获取指定玩家的收购背包（为空时自动创建）
+     * 获取指定玩家在指定世界的收购背包（为空时自动创建）
      */
-    public List<ItemStack> getCollectionBackpack(UUID ownerUuid) {
-        return collectionBackpacks.computeIfAbsent(ownerUuid, k -> new ArrayList<>());
+    public List<ItemStack> getCollectionBackpack(UUID ownerUuid, String worldName) {
+        return collectionBackpacks.computeIfAbsent(scopeKey(ownerUuid, worldName), k -> new ArrayList<>());
     }
 
     /**
      * 收购物品入包：同类物品尽量并入已有堆，放不下则追加新条目
      */
-    public void addItemToCollectionBackpack(UUID ownerUuid, ItemStack item) {
+    public void addItemToCollectionBackpack(UUID ownerUuid, String worldName, ItemStack item) {
         if (item == null || item.getType().isAir()) return;
         ItemStack add = item.clone();
-        List<ItemStack> backpack = getCollectionBackpack(ownerUuid);
+        List<ItemStack> backpack = getCollectionBackpack(ownerUuid, worldName);
         int max = add.getMaxStackSize();
         for (ItemStack existing : backpack) {
             if (add.getAmount() <= 0) break;
@@ -161,11 +172,29 @@ public class NPCManager {
     }
 
     /**
-     * 清空并返回收购背包全部物品（一键取回）
+     * 清空并返回指定世界的收购背包全部物品（一键取回）
      */
-    public List<ItemStack> clearCollectionBackpack(UUID ownerUuid) {
-        List<ItemStack> backpack = collectionBackpacks.remove(ownerUuid);
+    public List<ItemStack> clearCollectionBackpack(UUID ownerUuid, String worldName) {
+        List<ItemStack> backpack = collectionBackpacks.remove(scopeKey(ownerUuid, worldName));
         return backpack != null ? backpack : new ArrayList<>();
+    }
+
+    /**
+     * 旧格式收购背包（键=纯UUID）迁移目标世界：该玩家的NPC只在一个世界用该世界，
+     * 多个世界或无NPC时取主世界
+     */
+    private String migrateWorldFor(UUID ownerUuid) {
+        String found = null;
+        for (PhilosNPC npc : npcs.values()) {
+            if (npc.getOwnerUuid().equals(ownerUuid)) {
+                if (found == null) {
+                    found = npc.getWorldName();
+                } else if (!found.equals(npc.getWorldName())) {
+                    return Bukkit.getWorlds().get(0).getName();
+                }
+            }
+        }
+        return found != null ? found : Bukkit.getWorlds().get(0).getName();
     }
 
     @SuppressWarnings("unchecked")
@@ -176,25 +205,39 @@ public class NPCManager {
         if (section == null) return;
         for (String key : section.getKeys(false)) {
             try {
-                UUID ownerUuid = UUID.fromString(key);
-                List<ItemStack> items = new ArrayList<>();
-                for (Map<?, ?> rawMap : config.getMapList("backpacks." + key)) {
-                    try {
-                        items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
-                    } catch (IllegalArgumentException ignored) {
-                        // 单个物品损坏时跳过，不影响整包加载
-                    }
+                if (key.contains("|")) {
+                    // 新格式：UUID|世界名
+                    String[] parts = key.split("\\|", 2);
+                    UUID.fromString(parts[0]);
+                    collectionBackpacks.put(key, deserializeItemList(config, "backpacks." + key));
+                } else {
+                    // 旧格式：纯UUID → 按该玩家NPC所在世界迁移（多世界取主世界）
+                    UUID ownerUuid = UUID.fromString(key);
+                    String world = migrateWorldFor(ownerUuid);
+                    collectionBackpacks.put(scopeKey(ownerUuid, world), deserializeItemList(config, "backpacks." + key));
+                    plugin.getLogger().info("收购背包旧数据迁移: " + key + " → " + world);
                 }
-                collectionBackpacks.put(ownerUuid, items);
             } catch (IllegalArgumentException ignored) {
                 plugin.getLogger().warning("收购背包数据包含无效的UUID: " + key);
             }
         }
     }
 
+    private List<ItemStack> deserializeItemList(FileConfiguration config, String path) {
+        List<ItemStack> items = new ArrayList<>();
+        for (Map<?, ?> rawMap : config.getMapList(path)) {
+            try {
+                items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
+            } catch (IllegalArgumentException ignored) {
+                // 单个物品损坏时跳过，不影响整包加载
+            }
+        }
+        return items;
+    }
+
     private void saveCollectionBackpacks() {
         FileConfiguration config = new YamlConfiguration();
-        for (Map.Entry<UUID, List<ItemStack>> entry : collectionBackpacks.entrySet()) {
+        for (Map.Entry<String, List<ItemStack>> entry : collectionBackpacks.entrySet()) {
             List<Map<String, Object>> items = new ArrayList<>();
             for (ItemStack item : entry.getValue()) {
                 if (item != null && !item.getType().isAir()) {
@@ -209,6 +252,109 @@ public class NPCManager {
             config.save(backpackFile);
         } catch (IOException e) {
             plugin.getLogger().severe("保存收购背包失败: " + e.getMessage());
+        }
+    }
+
+    // ===== 跨世界转移仓库（按玩家，全局共享，仅白名单物品可入仓） =====
+
+    /**
+     * 获取玩家的转移仓库（为空时自动创建）
+     */
+    public List<ItemStack> getTransferVault(UUID ownerUuid) {
+        return transferVaults.computeIfAbsent(ownerUuid, k -> new ArrayList<>());
+    }
+
+    /**
+     * 判断物品是否允许入仓跨世界转移（PDC rpgforge:item-id 在白名单内）
+     */
+    public boolean isTransferAllowed(ItemStack item) {
+        if (item == null || item.getType().isAir()) return false;
+        var meta = item.getItemMeta();
+        if (meta == null) return false;
+        String id = meta.getPersistentDataContainer()
+                .get(NamespacedKey.fromString("rpgforge:item-id"), PersistentDataType.STRING);
+        return id != null && PluginSettings.transferAllowedIds().contains(id);
+    }
+
+    /**
+     * 转移物品入仓：同类物品尽量并入已有堆，放不下则追加新条目
+     */
+    public void addItemToTransferVault(UUID ownerUuid, ItemStack item) {
+        if (item == null || item.getType().isAir()) return;
+        ItemStack add = item.clone();
+        List<ItemStack> vault = getTransferVault(ownerUuid);
+        int max = add.getMaxStackSize();
+        for (ItemStack existing : vault) {
+            if (add.getAmount() <= 0) break;
+            if (existing.isSimilar(add) && existing.getAmount() < max) {
+                int move = Math.min(max - existing.getAmount(), add.getAmount());
+                existing.setAmount(existing.getAmount() + move);
+                add.setAmount(add.getAmount() - move);
+            }
+        }
+        if (add.getAmount() > 0) {
+            vault.add(add);
+        }
+    }
+
+    /**
+     * 按索引取出一组物品（点击仓库物品槽取出单个）
+     * @return 取出的物品；索引越界返回null
+     */
+    public ItemStack takeTransferItemAt(UUID ownerUuid, int index) {
+        List<ItemStack> vault = transferVaults.get(ownerUuid);
+        if (vault == null || index < 0 || index >= vault.size()) return null;
+        return vault.remove(index);
+    }
+
+    /**
+     * 清空并返回转移仓库全部物品（一键取回）
+     */
+    public List<ItemStack> clearTransferVault(UUID ownerUuid) {
+        List<ItemStack> vault = transferVaults.remove(ownerUuid);
+        return vault != null ? vault : new ArrayList<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadTransferVaults() {
+        if (!transferFile.exists()) return;
+        FileConfiguration config = YamlConfiguration.loadConfiguration(transferFile);
+        var section = config.getConfigurationSection("vaults");
+        if (section == null) return;
+        for (String key : section.getKeys(false)) {
+            try {
+                UUID ownerUuid = UUID.fromString(key);
+                List<ItemStack> items = new ArrayList<>();
+                for (Map<?, ?> rawMap : config.getMapList("vaults." + key)) {
+                    try {
+                        items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
+                    } catch (IllegalArgumentException ignored) {
+                    }
+                }
+                transferVaults.put(ownerUuid, items);
+            } catch (IllegalArgumentException ignored) {
+                plugin.getLogger().warning("转移仓库数据包含无效的UUID: " + key);
+            }
+        }
+    }
+
+    private void saveTransferVaults() {
+        FileConfiguration config = new YamlConfiguration();
+        for (Map.Entry<UUID, List<ItemStack>> entry : transferVaults.entrySet()) {
+            List<Map<String, Object>> items = new ArrayList<>();
+            for (ItemStack item : entry.getValue()) {
+                if (item != null && !item.getType().isAir()) {
+                    items.add(item.serialize());
+                }
+            }
+            if (!items.isEmpty()) {
+                config.set("vaults." + entry.getKey(), items);
+            }
+        }
+        try {
+            config.save(transferFile);
+        } catch (IOException e) {
+            plugin.getLogger().severe("保存转移仓库失败: " + e.getMessage());
         }
     }
 
@@ -233,8 +379,8 @@ public class NPCManager {
 
         // 装备默认留空（玩家模型自带身体），可通过装备编辑界面手动穿戴
 
-        // 同步共享商店背包到新NPC
-        ItemStack[] sharedInv = getSharedShopInventory(player.getUniqueId());
+        // 同步共享商店背包到新NPC（按玩家当前世界隔离）
+        ItemStack[] sharedInv = getSharedShopInventory(player.getUniqueId(), player.getWorld().getName());
         npc.setShopInventory(sharedInv);
 
         spawnNPC(npc);
@@ -383,26 +529,29 @@ public class NPCManager {
     // ===== 共享商店背包 =====
 
     /**
-     * 获取指定玩家的共享商店背包
+     * 获取指定玩家在指定世界的共享商店背包（跨世界隔离，防止跨世界走私物品）
      * @param ownerUuid 玩家UUID
+     * @param worldName 世界名
      * @return 商店背包物品数组（36格）
      */
-    public ItemStack[] getSharedShopInventory(UUID ownerUuid) {
-        ItemStack[] inv = sharedShopInventories.get(ownerUuid);
+    public ItemStack[] getSharedShopInventory(UUID ownerUuid, String worldName) {
+        String key = scopeKey(ownerUuid, worldName);
+        ItemStack[] inv = sharedShopInventories.get(key);
         if (inv == null) {
             inv = new ItemStack[36];
-            sharedShopInventories.put(ownerUuid, inv);
+            sharedShopInventories.put(key, inv);
         }
         return inv;
     }
 
     /**
-     * 设置指定玩家的共享商店背包
+     * 设置指定玩家在指定世界的共享商店背包
      * @param ownerUuid 玩家UUID
+     * @param worldName 世界名
      * @param inventory 背包物品数组
      */
-    public void setSharedShopInventory(UUID ownerUuid, ItemStack[] inventory) {
-        sharedShopInventories.put(ownerUuid, inventory);
+    public void setSharedShopInventory(UUID ownerUuid, String worldName, ItemStack[] inventory) {
+        sharedShopInventories.put(scopeKey(ownerUuid, worldName), inventory);
     }
 
     // ===== 实体生成 / 移除 =====

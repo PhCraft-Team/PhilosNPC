@@ -238,8 +238,8 @@ public class NPCGui {
             if (npc.hasFeature(feature)) {
                 // 已启用 - 灰色状态
                 inv.setItem(slots[i], createDisabledFeatureItem(feature));
-            } else if (feature == FeatureType.GIFT_PACK && !npc.isSystem()) {
-                // 礼包发放：仅系统NPC可添加，个人NPC显示锁定状态
+            } else if ((feature == FeatureType.GIFT_PACK || feature == FeatureType.TRANSFER) && !npc.isSystem()) {
+                // 礼包/跨世界转移：仅系统NPC可添加，个人NPC显示锁定状态
                 inv.setItem(slots[i], createLockedFeatureItem(feature));
             } else {
                 // 未启用 - 显示费用（个人NPC收费，系统NPC免费）

@@ -18,3 +18,9 @@ delete-refund: 250.0
 
 # 每个NPC最多可启用的功能数
 max-features: 5
+
+# 跨世界转移（系统NPC专属功能）：只有白名单内的 RPGForge 物品可入仓跨世界转移
+# 白名单匹配物品的 PDC 标签 rpgforge:item-id（即 RPGForge 物品ID），修改后 /pnpc reload 生效
+transfer:
+  allowed-rpgforge-ids:
+    - rpg_token

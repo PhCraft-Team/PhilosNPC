@@ -13,6 +13,8 @@ public final class PluginSettings {
     private static double featureAddCost = 100.0;
     private static double deleteRefund = 250.0;
     private static int maxFeatures = 5;
+    // 跨世界转移白名单：RPGForge 物品ID（PDC rpgforge:item-id）列表
+    private static java.util.List<String> transferAllowedIds = java.util.List.of("rpg_token");
 
     private PluginSettings() {}
 
@@ -23,6 +25,8 @@ public final class PluginSettings {
         featureAddCost = config.getDouble("feature-add-cost", 100.0);
         deleteRefund = config.getDouble("delete-refund", 250.0);
         maxFeatures = Math.max(1, config.getInt("max-features", 5));
+        var ids = config.getStringList("transfer.allowed-rpgforge-ids");
+        if (!ids.isEmpty()) transferAllowedIds = ids;
     }
 
     public static double createCost() { return createCost; }
@@ -31,4 +35,5 @@ public final class PluginSettings {
     public static double featureAddCost() { return featureAddCost; }
     public static double deleteRefund() { return deleteRefund; }
     public static int maxFeatures() { return maxFeatures; }
+    public static java.util.List<String> transferAllowedIds() { return transferAllowedIds; }
 }
