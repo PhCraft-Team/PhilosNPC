@@ -80,6 +80,8 @@ public class PhilosNPCPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // 先安全结束所有界面会话（写回编辑数据并释放编辑锁），再存盘
+        if (guiManager != null) guiManager.shutdown();
         if (npcManager != null) {
             npcManager.saveAll();
             npcManager.despawnAll();

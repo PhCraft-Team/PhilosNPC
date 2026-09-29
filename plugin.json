@@ -1,6 +1,6 @@
 {
   "pluginName": "PhilosNPC",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "group": "com.phcraft",
   "javaVersion": 21,
   "gradleVersion": "9.4.0",
