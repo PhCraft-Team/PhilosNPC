@@ -9,6 +9,8 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
+import java.util.Set;
+
 public class PhilosCommand implements CommandExecutor {
 
     @Override
@@ -111,6 +113,12 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c这不是你的NPC"));
                     return true;
                 }
+                if (!npc.isSystem() && mgr.isShopInventoryMigrationBlocked(npc.getOwnerUuid())) {
+                    Set<String> worlds = mgr.getShopInventoryMigrationReviewWorlds(npc.getOwnerUuid());
+                    player.sendMessage(PhilosNPCPlugin.cc("&c该店主在世界 &f" + String.join(", ", worlds)
+                            + " &c的商店库存待管理员核账，已暂停移动。请管理员停服后按库存恢复文档逐世界核对"));
+                    return true;
+                }
                 mgr.despawnNPC(npc);
                 org.bukkit.Location target = player.getLocation();
                 boolean crossWorld = !target.getWorld().getName().equals(npc.getWorldName());
@@ -137,8 +145,15 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c不是你的NPC"));
                     return true;
                 }
-                mgr.deleteNPC(npc.getId());
-                player.sendMessage(PhilosNPCPlugin.cc("&cNPC已删除"));
+                if (!npc.isSystem() && mgr.isShopInventoryMigrationBlocked(npc.getOwnerUuid())) {
+                    Set<String> worlds = mgr.getShopInventoryMigrationReviewWorlds(npc.getOwnerUuid());
+                    player.sendMessage(PhilosNPCPlugin.cc("&c该店主在世界 &f" + String.join(", ", worlds)
+                            + " &c的商店库存待管理员核账，已暂停删除。请管理员停服后按库存恢复文档逐世界核对"));
+                    return true;
+                }
+                if (mgr.deleteNPC(npc.getId())) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&cNPC已删除"));
+                }
             }
             case "tp" -> {
                 if (args.length < 2) {
@@ -177,6 +192,11 @@ public class PhilosCommand implements CommandExecutor {
                 plugin.reloadConfig();
                 PluginSettings.load(plugin.getConfig());
                 plugin.npcManager().loadAll();
+                if (!plugin.npcManager().isStorageReady()) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c存储加载或库存迁移失败，插件将禁用以保护数据"));
+                    plugin.getServer().getPluginManager().disablePlugin(plugin);
+                    return true;
+                }
                 player.sendMessage(PhilosNPCPlugin.cc("&a已重载（配置与费用已生效）"));
             }
             case "help" -> {

@@ -6,6 +6,7 @@ plugins {
 }
 
 def pluginConfig = new JsonSlurper().parse(file('plugin.json'))
+def mockitoVersion = '5.17.0'
 group = pluginConfig.group
 version = pluginConfig.version
 
@@ -14,6 +15,10 @@ repositories {
     maven { url = uri('https://repo.papermc.io/repository/maven-public/') }
     maven { url = uri('https://jitpack.io') }
     maven { url = uri('https://repo.codemc.io/repository/maven-releases/') }
+}
+
+configurations {
+    mockitoAgent
 }
 
 dependencies {
@@ -26,11 +31,18 @@ dependencies {
     implementation 'com.github.retrooper:packetevents-spigot:2.13.0'
     testImplementation platform('org.junit:junit-bom:5.12.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation "org.mockito:mockito-core:${mockitoVersion}"
+    mockitoAgent("org.mockito:mockito-core:${mockitoVersion}") { transitive = false }
+    testImplementation "io.papermc.paper:paper-api:${pluginConfig.paperVersion}"
+    testRuntimeOnly('com.github.MilkBowl:VaultAPI:1.7') {
+        exclude group: 'org.bukkit', module: 'bukkit'
+    }
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
+    jvmArgs "-javaagent:${configurations.mockitoAgent.singleFile.absolutePath}"
 }
 
 java {

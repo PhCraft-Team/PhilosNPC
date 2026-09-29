@@ -42,6 +42,11 @@ public class PhilosNPCPlugin extends JavaPlugin {
 
         npcManager = new NPCManager();
         npcManager.loadAll();
+        if (!npcManager.isStorageReady()) {
+            getLogger().severe("NPC存储未能安全加载或迁移，插件已禁用以避免覆盖/重复发放物品");
+            Bukkit.getPluginManager().disablePlugin(this);
+            return;
+        }
 
         guiManager = new GuiManager();
 
