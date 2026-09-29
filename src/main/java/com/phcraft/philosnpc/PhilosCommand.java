@@ -110,9 +110,15 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c这不是你的NPC"));
                     return true;
                 }
-                mgr.despawnNPC(npc);
+                gui.closeSessionsForNpc(npc.getId());
                 org.bukkit.Location target = player.getLocation();
                 boolean crossWorld = !target.getWorld().getName().equals(npc.getWorldName());
+                if (crossWorld && mgr.wouldLoseShopInventoryOnRemoval(npc)) {
+                    player.sendMessage(PhilosNPCPlugin.cc(
+                            "&c无法跨世界移动：这是该店主在原世界最后一个个人NPC，商店背包仍有物品。请先取回或移出全部库存"));
+                    return true;
+                }
+                mgr.despawnNPC(npc);
                 npc.setLocation(target);
                 if (crossWorld && !npc.isSystem()) {
                     // NPC跨世界移动：库存数据归属立即切换到新世界侧，防止继续持有旧世界的共享数组引用
@@ -136,8 +142,12 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c不是你的NPC"));
                     return true;
                 }
-                mgr.deleteNPC(npc.getId());
-                player.sendMessage(PhilosNPCPlugin.cc("&cNPC已删除"));
+                if (mgr.deleteNPC(npc.getId())) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&cNPC已删除"));
+                } else if (!npc.getOwnerUuid().equals(player.getUniqueId())) {
+                    player.sendMessage(PhilosNPCPlugin.cc(
+                            "&cNPC未删除：原世界最后一个个人NPC仍有商店库存，请先取回或移出全部库存"));
+                }
             }
             case "tp" -> {
                 if (args.length < 2) {
@@ -190,7 +200,7 @@ public class PhilosCommand implements CommandExecutor {
                     return true;
                 }
                 // 先安全结束商店背包编辑会话（写回并解锁），避免重载后旧界面把旧内容写回新数据
-                gui.closeAllShopEditSessions();
+                gui.closeAllNpcSessions();
                 plugin.npcManager().saveAll();
                 plugin.npcManager().despawnAll();
                 plugin.reloadConfig();

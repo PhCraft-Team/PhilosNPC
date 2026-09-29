@@ -16,6 +16,12 @@ repositories {
     maven { url = uri('https://repo.codemc.io/repository/maven-releases/') }
 }
 
+configurations {
+    mockitoAgent
+}
+
+def mockitoVersion = '5.17.0'
+
 dependencies {
     compileOnly "io.papermc.paper:paper-api:${pluginConfig.paperVersion}"
     // Vault 经济 API；排除其内嵌的旧版 bukkit，避免与 paper-api 冲突
@@ -29,14 +35,16 @@ dependencies {
     testImplementation('com.github.MilkBowl:VaultAPI:1.7') {
         exclude group: 'org.bukkit', module: 'bukkit'
     }
-    testImplementation 'org.mockito:mockito-core:5.17.0'
     testImplementation platform('org.junit:junit-bom:5.12.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation "org.mockito:mockito-core:${mockitoVersion}"
+    mockitoAgent("org.mockito:mockito-core:${mockitoVersion}") { transitive = false }
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
+    jvmArgs "-javaagent:${configurations.mockitoAgent.singleFile.absolutePath}"
     // JDK 25+ 类文件版本超出 Mockito 内置 ByteBuddy 支持范围，实验模式放行（CI 的 Java 21 无副作用）
     jvmArgs '-Dnet.bytebuddy.experimental=true'
 }
