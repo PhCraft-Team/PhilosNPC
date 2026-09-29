@@ -104,10 +104,13 @@ public class GuiManager implements Listener {
     private static class MerchantSession {
         final PhilosNPC npc;
         final List<ShopTrade> trades;
+        // 开店时的世界快照：交易期间NPC被移动/顾客被传送时仍读写原世界侧库存
+        final String worldName;
 
-        MerchantSession(PhilosNPC npc, List<ShopTrade> trades) {
+        MerchantSession(PhilosNPC npc, List<ShopTrade> trades, String worldName) {
             this.npc = npc;
             this.trades = trades;
+            this.worldName = worldName;
         }
     }
 
@@ -156,12 +159,24 @@ public class GuiManager implements Listener {
     public void openShopEditGui(Player player, PhilosNPC npc) {
         if (npc.isSystem()) {
             openTradeEditGui(player, npc, 0);
-        } else {
-            GuiState state = new GuiState(GuiState.Screen.SHOP_EDIT, npc.getId(), 0, new HashMap<>());
-            Inventory inv = ShopGui.shopInventoryGui(npc, state);
-            state.setInventory(inv);
-            player.openInventory(inv);
+            return;
         }
+        // 商店背包必须与NPC同世界操作（含管理员），防止站在别的世界远程取货绕过跨世界转移白名单
+        if (!player.getWorld().getName().equals(npc.getWorldName())) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c你不在该NPC所在世界（&f" + npc.getWorldName() + "&c），无法操作商店背包"));
+            return;
+        }
+        // 同一背包同一时间只允许一名编辑者（店主/管理员），防止关闭时互相覆盖；编辑期间该世界侧交易冻结
+        if (!npcManager.tryLockShopInventory(npc.getOwnerUuid(), npc.getWorldName(), player.getUniqueId())) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c该商店背包正在被编辑，请稍后再试"));
+            return;
+        }
+        GuiState state = new GuiState(GuiState.Screen.SHOP_EDIT, npc.getId(), 0, new HashMap<>());
+        // 会话世界快照：NPC在编辑期间被移动时，界面内容仍写回原世界侧，不跟随NPC跨世界
+        state.getData().put("sessionWorld", npc.getWorldName());
+        Inventory inv = ShopGui.shopInventoryGui(npc, state);
+        state.setInventory(inv);
+        player.openInventory(inv);
     }
 
     public void openTradeEditGui(Player player, PhilosNPC npc, int page) {
@@ -174,6 +189,11 @@ public class GuiManager implements Listener {
     // ===== 收购背包界面 =====
 
     public void openCollectionBackpackGui(Player player, PhilosNPC npc, int page) {
+        // 取回会直接把物品给玩家，必须与NPC同世界操作，防止站在别的世界远程取回绕过跨世界隔离
+        if (!player.getWorld().getName().equals(npc.getWorldName())) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c你不在该NPC所在世界（&f" + npc.getWorldName() + "&c），无法操作收购背包"));
+            return;
+        }
         Map<String, Object> data = new HashMap<>();
         data.put("ownerUuid", npc.getOwnerUuid().toString());
         data.put("worldName", npc.getWorldName());
@@ -430,6 +450,18 @@ public class GuiManager implements Listener {
             return;
         }
 
+        // 个人NPC：必须与NPC同世界交易（防止站在别的世界远程买卖绕过跨世界隔离）
+        if (!npc.isSystem() && !player.getWorld().getName().equals(npc.getWorldName())) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c你不在该NPC所在世界（&f" + npc.getWorldName() + "&c），无法交易"));
+            return;
+        }
+        // 编辑期间冻结交易：店主正持有界面副本，此时成交会在关闭时被旧副本覆盖
+        if (!npc.isSystem() && npcManager.isShopInventoryLocked(npc.getOwnerUuid(), npc.getWorldName())) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c店主正在整理货架，请稍后再来"));
+            player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
+            return;
+        }
+
         Merchant merchant = Bukkit.createMerchant(PhilosNPCPlugin.cc("&b&l" + npc.getDisplayName() + " 的商店"));
         List<MerchantRecipe> recipes = new ArrayList<>();
         List<ShopTrade> sessionTrades = new ArrayList<>();
@@ -475,8 +507,8 @@ public class GuiManager implements Listener {
 
         merchant.setRecipes(recipes);
         player.openMerchant(merchant, true);
-        // 会话在 openMerchant 之后注册，避免关闭旧界面时被误清理
-        merchantSessions.put(player.getUniqueId(), new MerchantSession(npc, sessionTrades));
+        // 会话在 openMerchant 之后注册，避免关闭旧界面时被误清理；世界取开店时快照
+        merchantSessions.put(player.getUniqueId(), new MerchantSession(npc, sessionTrades, npc.getWorldName()));
 
         // 默认选中的配方若为金币交易，自动填充门票（延迟确保界面已打开）
         if (!sessionTrades.isEmpty() && sessionTrades.get(0).isUseCurrency()) {
@@ -646,6 +678,20 @@ public class GuiManager implements Listener {
                 if (selected < 0 || selected >= session.trades.size()) return;
                 ShopTrade trade = session.trades.get(selected);
 
+                // 个人NPC：顾客必须仍在开店世界（跨世界传送理论上会关闭界面，此处兜底防绕过隔离）
+                if (!session.npc.isSystem() && !player.getWorld().getName().equals(session.worldName)) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c你已离开该商店所在世界，交易取消"));
+                    player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
+                    return;
+                }
+                // 兜底：开店后店主才开始编辑 → 拒绝成交（编辑界面关闭时会把旧副本写回，覆盖刚扣的库存）
+                if (!session.npc.isSystem()
+                        && npcManager.isShopInventoryLocked(session.npc.getOwnerUuid(), session.worldName)) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c店主正在整理货架，请稍后再来"));
+                    player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
+                    return;
+                }
+
                 if (!trade.canUse()) {
                     player.sendMessage(PhilosNPCPlugin.cc("&c此商品已售罄"));
                     player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
@@ -663,7 +709,7 @@ public class GuiManager implements Listener {
                     boolean selfPurchase = !isSystem && player.getUniqueId().equals(ownerUuid);
                     // 个人NPC：先检查共享商店背包库存
                     if (!isSystem) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.npc.getWorldName());
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.worldName);
                         if (!hasEnoughInArray(shopInv, trade.getResult())) {
                             player.sendMessage(PhilosNPCPlugin.cc("&c商店库存不足"));
                             player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
@@ -686,9 +732,9 @@ public class GuiManager implements Listener {
                     }
                     // 个人NPC：从共享商店背包扣除产出
                     if (!isSystem) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.npc.getWorldName());
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.worldName);
                         removeFromArray(shopInv, trade.getResult());
-                        npcManager.setSharedShopInventory(ownerUuid, session.npc.getWorldName(), shopInv);
+                        npcManager.setSharedShopInventory(ownerUuid, session.worldName, shopInv);
                     }
                     giveResult(player, trade.getResult().clone());
                     trade.incrementUses();
@@ -717,7 +763,7 @@ public class GuiManager implements Listener {
 
                     // 个人NPC：检查共享商店背包库存
                     if (!session.npc.isSystem()) {
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid(), session.npc.getWorldName());
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(session.npc.getOwnerUuid(), session.worldName);
                         if (!hasEnoughInArray(shopInv, trade.getResult())) {
                             player.sendMessage(PhilosNPCPlugin.cc("&c商店库存不足"));
                             player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
@@ -733,13 +779,13 @@ public class GuiManager implements Listener {
                     // 个人NPC：价格物品存入店主的收购背包，产出从共享商店背包扣除
                     if (!session.npc.isSystem()) {
                         UUID ownerUuid = session.npc.getOwnerUuid();
-                        npcManager.addItemToCollectionBackpack(ownerUuid, session.npc.getWorldName(), trade.getPrice1().clone());
+                        npcManager.addItemToCollectionBackpack(ownerUuid, session.worldName, trade.getPrice1().clone());
                         if (trade.getPrice2() != null) {
-                            npcManager.addItemToCollectionBackpack(ownerUuid, session.npc.getWorldName(), trade.getPrice2().clone());
+                            npcManager.addItemToCollectionBackpack(ownerUuid, session.worldName, trade.getPrice2().clone());
                         }
-                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.npc.getWorldName());
+                        ItemStack[] shopInv = npcManager.getSharedShopInventory(ownerUuid, session.worldName);
                         removeFromArray(shopInv, trade.getResult());
-                        npcManager.setSharedShopInventory(ownerUuid, session.npc.getWorldName(), shopInv);
+                        npcManager.setSharedShopInventory(ownerUuid, session.worldName, shopInv);
                     }
                     trade.incrementUses();
                     npcManager.saveAll();
@@ -1022,11 +1068,15 @@ public class GuiManager implements Listener {
                 if (topInv.getSize() == 45) {
                     // 个人NPC商店背包：关闭时自动保存
                     if (npc != null && !npc.isSystem()) {
+                        // 写回会话打开时的世界快照侧（编辑期间NPC被移动时不跟随），并释放编辑锁
+                        Object snapshot = state.getData().get("sessionWorld");
+                        String world = snapshot != null ? snapshot.toString() : npc.getWorldName();
                         var items = new ItemStack[36];
                         for (int i = 0; i < 36; i++) {
                             items[i] = topInv.getItem(i);
                         }
-                        npcManager.setSharedShopInventory(npc.getOwnerUuid(), npc.getWorldName(), items);
+                        npcManager.setSharedShopInventory(npc.getOwnerUuid(), world, items);
+                        npcManager.unlockShopInventory(npc.getOwnerUuid(), world, player.getUniqueId());
                         npcManager.saveAll();
                     }
                 } else {
@@ -1059,6 +1109,23 @@ public class GuiManager implements Listener {
         pendingCurrencyTrade.remove(uuid);
         pendingCurrencyResult.remove(uuid);
         pendingRename.remove(uuid);
+        // 兜底释放该玩家持有的商店背包编辑锁（正常关闭界面时已解锁，此处防异常路径锁死商店）
+        npcManager.clearShopEditLocks(uuid);
+    }
+
+    /**
+     * 安全结束所有玩家的商店背包编辑会话：关闭界面触发保存写回并释放编辑锁。
+     * 供 /pnpc reload 在重载数据前调用，防止重载后旧界面把旧内容写回新数据。
+     */
+    public void closeAllShopEditSessions() {
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            Inventory top = online.getOpenInventory().getTopInventory();
+            if (top.getHolder() instanceof GuiState state
+                    && state.getScreen() == GuiState.Screen.SHOP_EDIT
+                    && top.getSize() == 45) {
+                online.closeInventory(); // 触发 InventoryCloseEvent：按世界快照写回并解锁
+            }
+        }
     }
 
     // ===== 主界面点击处理 =====

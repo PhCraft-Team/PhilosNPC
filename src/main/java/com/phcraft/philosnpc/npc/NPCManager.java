@@ -43,6 +43,8 @@ public class NPCManager {
     // 跨世界转移仓库：按玩家UUID（天生跨世界），只存白名单物品，独立文件存储
     private final Map<UUID, List<ItemStack>> transferVaults;
     private final File transferFile;
+    // 商店背包编辑锁：scopeKey → 编辑者UUID（编辑期间冻结同店主同世界的交易，防止关闭时旧副本覆盖交易结果）
+    private final Map<String, UUID> shopEditLocks = new HashMap<>();
     // 村民式头部动画状态（entityId -> 状态）
     private final Map<Integer, HeadState> headStates = new HashMap<>();
     // 已生成NPC的实体引用（entityId -> 实体），供动画循环快速访问
@@ -96,6 +98,9 @@ public class NPCManager {
             }
         }
 
+        // 旧版共享库存一次性迁移到按店主+世界隔离格式（需在NPC加载后、共享库存分组前执行）
+        migrateLegacyShopInventories(config);
+
         // 加载收购背包（NPC数据之后：旧格式迁移需要按该玩家NPC所在世界归并）
         loadCollectionBackpacks();
         loadTransferVaults();
@@ -125,6 +130,8 @@ public class NPCManager {
         }
 
         FileConfiguration config = new YamlConfiguration();
+        // 库存格式版本标记：已迁移/新格式存档不再走旧共享库存迁移
+        config.set("inventory-format", 2);
         List<Map<String, Object>> npcList = new ArrayList<>();
         for (PhilosNPC npc : npcs.values()) {
             npcList.add(npc.toMap());
@@ -139,6 +146,108 @@ public class NPCManager {
 
         saveCollectionBackpacks();
         saveTransferVaults();
+    }
+
+    // ===== 旧版共享库存一次性迁移 =====
+
+    /**
+     * 旧版按店主共享的商店库存（各世界NPC携带同一份副本）一次性迁移到按店主+世界隔离格式。
+     * 无标记时执行：各世界副本完全一致 → 视为旧版复制产物，仅保留主世界侧一份，其余清空；
+     * 副本不一致 → 可能为升级后各自演化过的数据，原样保留并提示管理员核账，不任意删除。
+     * 迁移前备份 npcs.yml，完成后写入 inventory-format 标记，重复启动不会二次迁移。
+     */
+    private void migrateLegacyShopInventories(FileConfiguration config) {
+        if (config.getInt("inventory-format", 0) >= 2) return;
+
+        // 收集个人NPC（系统NPC无共享库存）按店主分组
+        Map<UUID, List<PhilosNPC>> personalByOwner = new LinkedHashMap<>();
+        for (PhilosNPC npc : npcs.values()) {
+            if (!npc.isSystem()) {
+                personalByOwner.computeIfAbsent(npc.getOwnerUuid(), k -> new ArrayList<>()).add(npc);
+            }
+        }
+
+        boolean needsBackup = false;
+        Map<UUID, String> migrateTargets = new LinkedHashMap<>();
+        for (Map.Entry<UUID, List<PhilosNPC>> entry : personalByOwner.entrySet()) {
+            // 每个世界取第一个NPC保存的副本（与共享库存分组初始化口径一致）
+            Map<String, ItemStack[]> firstByWorld = new LinkedHashMap<>();
+            for (PhilosNPC npc : entry.getValue()) {
+                firstByWorld.putIfAbsent(npc.getWorldName(), npc.getShopInventory());
+            }
+            if (firstByWorld.size() < 2) continue; // 单世界店主无复制风险
+
+            ItemStack[] reference = null;
+            boolean consistent = true;
+            for (ItemStack[] inv : firstByWorld.values()) {
+                if (reference == null) {
+                    reference = inv;
+                } else if (!inventoriesIdentical(reference, inv)) {
+                    consistent = false;
+                    break;
+                }
+            }
+
+            if (!consistent) {
+                plugin.getLogger().warning("店主 " + entry.getKey() + " 在多个世界的商店库存内容不一致，"
+                        + "可能是升级后各自演化过的数据，已原样保留，请管理员人工核账，不做自动迁移");
+                continue;
+            }
+            needsBackup = true;
+            migrateTargets.put(entry.getKey(), migrateWorldFor(entry.getKey()));
+        }
+
+        // 备份必须在清空副本之前完成：备份失败时若内存已被清空，后续任意saveAll会把清空结果写盘绕过备份
+        if (needsBackup) {
+            File backup = new File(dataFile.getParentFile(), "npcs.yml.bak-v1-inventory");
+            if (!backup.exists()) {
+                try {
+                    java.nio.file.Files.copy(dataFile.toPath(), backup.toPath());
+                } catch (IOException e) {
+                    plugin.getLogger().severe("迁移前备份 npcs.yml 失败，本次启动跳过迁移（下次启动重试）: " + e.getMessage());
+                    return;
+                }
+            }
+        }
+
+        for (Map.Entry<UUID, String> entry : migrateTargets.entrySet()) {
+            String target = entry.getValue();
+            for (PhilosNPC npc : personalByOwner.get(entry.getKey())) {
+                if (!npc.getWorldName().equals(target)) {
+                    npc.setShopInventory(new ItemStack[36]);
+                }
+            }
+            plugin.getLogger().info("旧版共享商店库存迁移：店主 " + entry.getKey()
+                    + " 的库存保留至世界 " + target + "，其余世界副本清空");
+        }
+
+        config.set("inventory-format", 2);
+        List<Map<String, Object>> npcList = new ArrayList<>();
+        for (PhilosNPC npc : npcs.values()) {
+            npcList.add(npc.toMap());
+        }
+        config.set("npcs", npcList);
+        try {
+            config.save(dataFile);
+        } catch (IOException e) {
+            plugin.getLogger().severe("写入库存格式标记失败（迁移结果仅在内存，下次启动将重新迁移）: " + e.getMessage());
+        }
+    }
+
+    /** 逐格比较两份库存是否完全一致（类型、堆叠数与物品元数据） */
+    static boolean inventoriesIdentical(ItemStack[] a, ItemStack[] b) {
+        if (a == null || b == null) return a == b;
+        int n = Math.min(a.length, b.length);
+        for (int i = 0; i < n; i++) {
+            ItemStack x = a[i];
+            ItemStack y = b[i];
+            if (x == null || y == null) {
+                if (x != y) return false;
+                continue;
+            }
+            if (x.getAmount() != y.getAmount() || !x.isSimilar(y)) return false;
+        }
+        return true;
     }
 
     // ===== 收购背包（物物交易收入，同玩家同世界共享，跨世界隔离） =====
@@ -552,6 +661,38 @@ public class NPCManager {
      */
     public void setSharedShopInventory(UUID ownerUuid, String worldName, ItemStack[] inventory) {
         sharedShopInventories.put(scopeKey(ownerUuid, worldName), inventory);
+    }
+
+    // ===== 商店背包编辑锁 =====
+
+    /**
+     * 尝试锁定共享商店背包用于编辑（同一背包同一时间只允许一名编辑者，防止关闭时互相覆盖）。
+     * 编辑期间该店主该世界的所有NPC交易被冻结。
+     * @return 锁定成功（或编辑者即本人重入）返回true
+     */
+    public boolean tryLockShopInventory(UUID ownerUuid, String worldName, UUID editor) {
+        String key = scopeKey(ownerUuid, worldName);
+        UUID current = shopEditLocks.get(key);
+        if (current != null && !current.equals(editor)) return false;
+        shopEditLocks.put(key, editor);
+        return true;
+    }
+
+    /** 解锁共享商店背包（仅编辑者本人可解，幂等） */
+    public void unlockShopInventory(UUID ownerUuid, String worldName, UUID editor) {
+        if (editor != null && editor.equals(shopEditLocks.get(scopeKey(ownerUuid, worldName)))) {
+            shopEditLocks.remove(scopeKey(ownerUuid, worldName));
+        }
+    }
+
+    /** 该背包当前是否处于编辑锁定中（编辑期间冻结交易） */
+    public boolean isShopInventoryLocked(UUID ownerUuid, String worldName) {
+        return shopEditLocks.containsKey(scopeKey(ownerUuid, worldName));
+    }
+
+    /** 清除指定编辑者持有的全部背包锁（退出/换世界/重载时兜底，防止永久锁定） */
+    public void clearShopEditLocks(UUID editor) {
+        shopEditLocks.values().removeIf(editor::equals);
     }
 
     // ===== 实体生成 / 移除 =====

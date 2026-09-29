@@ -24,6 +24,13 @@ dependencies {
     }
     // packetevents 打包进 JAR 并重定位，避免与其他插件自带版本冲突
     implementation 'com.github.retrooper:packetevents-spigot:2.13.0'
+    testImplementation platform('org.junit:junit-bom:5.12.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
 }
 
 java {

@@ -112,7 +112,13 @@ public class PhilosCommand implements CommandExecutor {
                     return true;
                 }
                 mgr.despawnNPC(npc);
-                npc.setLocation(player.getLocation());
+                org.bukkit.Location target = player.getLocation();
+                boolean crossWorld = !target.getWorld().getName().equals(npc.getWorldName());
+                npc.setLocation(target);
+                if (crossWorld && !npc.isSystem()) {
+                    // NPC跨世界移动：库存数据归属立即切换到新世界侧，防止继续持有旧世界的共享数组引用
+                    npc.setShopInventory(mgr.getSharedShopInventory(npc.getOwnerUuid(), target.getWorld().getName()));
+                }
                 mgr.spawnNPC(npc);
                 mgr.saveAll();
                 player.sendMessage(PhilosNPCPlugin.cc("&aNPC已移到你脚下"));
@@ -164,6 +170,8 @@ public class PhilosCommand implements CommandExecutor {
                     player.sendMessage(PhilosNPCPlugin.cc("&c你没有权限"));
                     return true;
                 }
+                // 先安全结束商店背包编辑会话（写回并解锁），避免重载后旧界面把旧内容写回新数据
+                gui.closeAllShopEditSessions();
                 plugin.npcManager().saveAll();
                 plugin.npcManager().despawnAll();
                 plugin.reloadConfig();
