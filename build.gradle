@@ -34,7 +34,7 @@ dependencies {
     testImplementation "org.mockito:mockito-core:${mockitoVersion}"
     mockitoAgent("org.mockito:mockito-core:${mockitoVersion}") { transitive = false }
     testImplementation "io.papermc.paper:paper-api:${pluginConfig.paperVersion}"
-    testRuntimeOnly('com.github.MilkBowl:VaultAPI:1.7') {
+    testImplementation('com.github.MilkBowl:VaultAPI:1.7') {
         exclude group: 'org.bukkit', module: 'bukkit'
     }
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
