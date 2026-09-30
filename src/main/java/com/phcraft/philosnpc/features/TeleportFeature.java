@@ -13,6 +13,23 @@ import org.bukkit.entity.Player;
  */
 public class TeleportFeature {
 
+    private static final org.bukkit.NamespacedKey UNRESOLVED_PAYMENT =
+            new org.bukkit.NamespacedKey("philosnpc", "unresolved_teleport_payment");
+
+    private static void blockPayment(Player player, double cost) {
+        player.getPersistentDataContainer().set(UNRESOLVED_PAYMENT,
+                org.bukkit.persistence.PersistentDataType.DOUBLE, cost);
+        player.saveData();
+    }
+
+    /** 仅在管理员已核对经济账本后调用；此操作不扣款也不退款。 */
+    public static boolean reconcilePayment(Player player) {
+        if (!player.getPersistentDataContainer().has(UNRESOLVED_PAYMENT)) return false;
+        player.getPersistentDataContainer().remove(UNRESOLVED_PAYMENT);
+        player.saveData();
+        return true;
+    }
+
     /**
      * 设置传送目标点为editor当前位置
      * @param editor 编辑者玩家
@@ -26,7 +43,7 @@ public class TeleportFeature {
 
     /**
      * 执行传送
-     * 扣除费用（给系统），传送到目标点
+     * 经安全付款通道扣除费用，传送失败自动退款
      * @param player 玩家
      * @param npc NPC对象
      * @return 是否传送成功
@@ -41,25 +58,62 @@ public class TeleportFeature {
         }
 
         double cost = npc.getEffectiveTeleportCost();
-
-        // 扣除费用
-        if (PhilosNPCPlugin.economy() != null && cost > 0) {
-            EconomyResponse resp = PhilosNPCPlugin.economy().withdrawPlayer(player, cost);
-            if (!resp.transactionSuccess()) {
-                player.sendMessage(PhilosNPCPlugin.cc(
-                        "&c金币不足，传送需要 " + cost + " 金币"));
-                return false;
-            }
-        }
-
-        // 执行传送
-        player.teleport(target);
-        player.sendMessage(PhilosNPCPlugin.cc(
-                "&a已传送，花费 " + cost + " 金币"));
+        if (!teleport(player, target, cost)) return false;
         // 使用成功通知主人（系统NPC与本人使用由notify内部过滤）
         UsageNotify.notify(npc, player,
                 "&e" + player.getName() + " &a使用了你的 &f" + npc.getDisplayName() + " &a的传送功能");
+        return true;
+    }
 
+    /**
+     * 安全付费传送：付款结果未知或退款失败都会在玩家 PDC 留下付款锁，
+     * 暂停其后续收费传送，待管理员核对账本后用 reconcile 解除。
+     */
+    public static boolean teleport(Player player, Location target, double cost) {
+        if (target == null || target.getWorld() == null || !Double.isFinite(cost) || cost < 0) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c传送目标或费用无效"));
+            return false;
+        }
+        if (cost > 0 && player.getPersistentDataContainer().has(UNRESOLVED_PAYMENT)) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c存在待核对的传送付款，已暂停收费传送，请联系管理员。"));
+            return false;
+        }
+        var economy = PhilosNPCPlugin.economy();
+        Payments.Result payment = Payments.transfer(economy, player, null, cost);
+        if (payment != Payments.Result.SUCCESS) {
+            player.sendMessage(PhilosNPCPlugin.cc("&c传送付款未完成；若余额异常，请联系管理员核对。"));
+            if (payment == Payments.Result.UNCERTAIN) {
+                blockPayment(player, cost);
+                PhilosNPCPlugin.instance().getLogger().severe("传送付款结果未知：player="
+                        + player.getUniqueId() + ", cost=" + cost);
+            }
+            return false;
+        }
+        boolean teleported;
+        try {
+            teleported = player.teleport(target);
+        } catch (RuntimeException ex) {
+            teleported = false;
+        }
+        if (!teleported) {
+            boolean refunded = cost == 0;
+            if (cost > 0) {
+                try {
+                    EconomyResponse refund = economy.depositPlayer(player, cost);
+                    refunded = refund != null && refund.transactionSuccess();
+                } catch (RuntimeException ex) {
+                    // 禁止重试结果未知的退款。
+                }
+            }
+            player.sendMessage(PhilosNPCPlugin.cc(refunded ? "&c传送未成功，费用已退回。" : "&c传送未成功，退款异常，请联系管理员。"));
+            if (!refunded) {
+                blockPayment(player, cost);
+                PhilosNPCPlugin.instance().getLogger().severe("传送退款需核对：player="
+                        + player.getUniqueId() + ", cost=" + cost);
+            }
+            return false;
+        }
+        player.sendMessage(PhilosNPCPlugin.cc("&a已传送，花费 " + cost + " 金币"));
         return true;
     }
 

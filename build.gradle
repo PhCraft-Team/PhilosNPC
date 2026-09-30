@@ -42,7 +42,8 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
-    jvmArgs "-javaagent:${configurations.mockitoAgent.singleFile.absolutePath}"
+    // JDK 25+ 类文件版本超出 Mockito 内置 ByteBuddy 支持范围，实验模式放行（CI 的 Java 21 无副作用）
+    jvmArgs "-javaagent:${configurations.mockitoAgent.singleFile.absolutePath}", '-Dnet.bytebuddy.experimental=true'
 }
 
 java {
