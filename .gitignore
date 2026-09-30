@@ -1,19 +1,7 @@
-build/
 .gradle/
-*.class
-*.jar
-!gradle/wrapper/gradle-wrapper.jar
+build/
+out/
 .idea/
 *.iml
-*.ipr
-*.iws
-.settings/
-.project
-.classpath
-bin/
-*.log
-
-# Template build and Python cache
-out/
 __pycache__/
 *.pyc

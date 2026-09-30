@@ -1,19 +1,11 @@
 package com.phcraft.philosnpc.npc;
 
+/**
+ * NPC姿势：玩家原生Pose，仅站立与坐姿（玩家形态模型）
+ */
 public enum NPCPose {
     STANDING("站立", "🧍"),
-    SNEAKING("潜行", "🤫"),
-    SITTING("坐着", "🪑"),
-    LYING("躺着", "🛌"),
-    DANCING("跳舞", "💃"),
-    WAVE("挥手", "👋"),
-    ARMS_CROSSED("抱胸", "🤔"),
-    THUMBS_UP("点赞", "👍"),
-    BOWING("鞠躬", "🙇"),
-    SUPERMAN("超人飞行", "🦸"),
-    POINTING("指向前方", "👉"),
-    MEDITATION("打坐", "🧘"),
-    FACEPALM("捂脸", "🤦");
+    SITTING("坐着", "🪑");
 
     private final String displayName;
     private final String emoji;
@@ -25,4 +17,16 @@ public enum NPCPose {
 
     public String displayName() { return displayName; }
     public String emoji() { return emoji; }
+
+    /**
+     * 兼容旧数据：旧版本的其他姿势一律回退为站立
+     */
+    public static NPCPose parse(String name) {
+        if (name == null) return STANDING;
+        try {
+            return valueOf(name);
+        } catch (IllegalArgumentException e) {
+            return STANDING;
+        }
+    }
 }

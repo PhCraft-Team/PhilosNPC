@@ -1,6 +1,7 @@
 package com.phcraft.philosnpc.npc;
 
-import com.phcraft.philosnpc.PhilosNPCPlugin;
+import com.phcraft.philosnpc.PluginSettings;
+import com.phcraft.philosnpc.features.GiftPack;
 import com.phcraft.philosnpc.features.ShopTrade;
 import com.phcraft.philosnpc.features.TeleportFeature;
 import org.bukkit.Bukkit;
@@ -16,6 +17,8 @@ public class PhilosNPC {
     private String ownerName;
     private UUID ownerUuid;
     private Location location;
+    // NPC 所在世界名（从存档记录，世界未加载时 getLocation().getWorld() 为 null，仍可键控）
+    private String worldName;
     private NPCPose pose;
     private double scale;
     private List<FeatureType> features;
@@ -28,16 +31,22 @@ public class PhilosNPC {
     private String entityTypeName = null;
     // 系统NPC自定义传送费用（-1表示使用默认）
     private double customTeleportCost = -1;
+    // 商店交易编辑模式：true=物品交易(以物换物)，false=金币交易；仅影响新增交易
+    private boolean shopItemTradeMode = false;
+    // 玩家形态皮肤纹理（从创建者捕获，用于虚拟玩家实体）
+    private String skinValue = null;
+    private String skinSignature = null;
 
     // 商店相关
     private ItemStack[] shopInventory; // 36格共享商店背包
     private List<ShopTrade> trades;
 
+    // 礼包发放相关
+    private List<GiftPack> giftPacks;
+
     // 传送相关
     private Location teleportTarget;
-
-    // 点歌相关
-    private ItemStack[] jukeboxDiscs; // 9格唱片栏
+    private String teleportTargetWorldName;
 
     // 留言相关
     private String message;
@@ -56,8 +65,8 @@ public class PhilosNPC {
         this.equipment = new ItemStack[5];
         this.shopInventory = new ItemStack[36];
         this.trades = new ArrayList<>();
+        this.giftPacks = new ArrayList<>();
         this.teleportTarget = null;
-        this.jukeboxDiscs = new ItemStack[9];
         this.message = "";
         this.createdAt = System.currentTimeMillis();
     }
@@ -67,7 +76,7 @@ public class PhilosNPC {
         this.equipment = new ItemStack[5];
         this.shopInventory = new ItemStack[36];
         this.trades = new ArrayList<>();
-        this.jukeboxDiscs = new ItemStack[9];
+        this.giftPacks = new ArrayList<>();
         this.message = "";
         this.createdAt = System.currentTimeMillis();
     }
@@ -84,7 +93,18 @@ public class PhilosNPC {
     public void setOwnerUuid(UUID ownerUuid) { this.ownerUuid = ownerUuid; }
 
     public Location getLocation() { return location; }
-    public void setLocation(Location location) { this.location = location; }
+    public void setLocation(Location location) {
+        this.location = location;
+        if (location != null && location.getWorld() != null) {
+            this.worldName = location.getWorld().getName();
+        }
+    }
+
+    /** NPC 所在世界名：优先实时 World，世界未加载时回退到存档记录 */
+    public String getWorldName() {
+        if (location != null && location.getWorld() != null) return location.getWorld().getName();
+        return worldName != null ? worldName : "world";
+    }
 
     public NPCPose getPose() { return pose; }
     public void setPose(NPCPose pose) { this.pose = pose; }
@@ -107,11 +127,21 @@ public class PhilosNPC {
     public List<ShopTrade> getTrades() { return trades; }
     public void setTrades(List<ShopTrade> trades) { this.trades = trades; }
 
-    public Location getTeleportTarget() { return teleportTarget; }
-    public void setTeleportTarget(Location teleportTarget) { this.teleportTarget = teleportTarget; }
+    public List<GiftPack> getGiftPacks() { return giftPacks; }
 
-    public ItemStack[] getJukeboxDiscs() { return jukeboxDiscs; }
-    public void setJukeboxDiscs(ItemStack[] jukeboxDiscs) { this.jukeboxDiscs = jukeboxDiscs; }
+    public GiftPack getGiftPack(String packId) {
+        for (GiftPack pack : giftPacks) {
+            if (pack.getId().equals(packId)) return pack;
+        }
+        return null;
+    }
+
+    public Location getTeleportTarget() { return teleportTarget; }
+    public void setTeleportTarget(Location teleportTarget) {
+        this.teleportTarget = teleportTarget;
+        this.teleportTargetWorldName = teleportTarget == null || teleportTarget.getWorld() == null
+                ? null : teleportTarget.getWorld().getName();
+    }
 
     public String getMessage() { return message; }
     public void setMessage(String message) { this.message = message; }
@@ -128,6 +158,15 @@ public class PhilosNPC {
     public double getCustomTeleportCost() { return customTeleportCost; }
     public void setCustomTeleportCost(double cost) { this.customTeleportCost = cost; }
 
+    public boolean isShopItemTradeMode() { return shopItemTradeMode; }
+    public void setShopItemTradeMode(boolean shopItemTradeMode) { this.shopItemTradeMode = shopItemTradeMode; }
+
+    public String getSkinValue() { return skinValue; }
+    public void setSkinValue(String skinValue) { this.skinValue = skinValue; }
+
+    public String getSkinSignature() { return skinSignature; }
+    public void setSkinSignature(String skinSignature) { this.skinSignature = skinSignature; }
+
     public boolean isSystem() { return npcType == NPCType.SYSTEM; }
 
     public double getEffectiveTeleportCost() {
@@ -137,7 +176,7 @@ public class PhilosNPC {
     // ===== Feature 管理 =====
 
     public boolean addFeature(FeatureType feature) {
-        if (features.size() >= PhilosNPCPlugin.MAX_FEATURES) {
+        if (features.size() >= PluginSettings.maxFeatures()) {
             return false;
         }
         if (features.contains(feature)) {
@@ -162,7 +201,8 @@ public class PhilosNPC {
         map.put("id", id);
         map.put("ownerName", ownerName);
         map.put("ownerUuid", ownerUuid.toString());
-        map.put("location", serializeLocation(location));
+        // The configured world may not be loaded, but its saved name still owns this NPC and stock.
+        map.put("location", serializeLocation(location, worldName));
         map.put("pose", pose.name());
         map.put("scale", scale);
 
@@ -205,25 +245,28 @@ public class PhilosNPC {
 
         // teleportTarget
         if (teleportTarget != null) {
-            map.put("teleportTarget", serializeLocation(teleportTarget));
+            map.put("teleportTarget", serializeLocation(teleportTarget, teleportTargetWorldName));
         }
-
-        // jukeboxDiscs
-        List<Map<String, Object>> jukeboxList = new ArrayList<>();
-        for (ItemStack item : jukeboxDiscs) {
-            if (item != null) {
-                jukeboxList.add(item.serialize());
-            } else {
-                jukeboxList.add(null);
-            }
-        }
-        map.put("jukeboxDiscs", jukeboxList);
 
         map.put("message", message);
         map.put("createdAt", createdAt);
         map.put("npcType", npcType.name());
+        if (skinValue != null) {
+            map.put("skinValue", skinValue);
+            if (skinSignature != null) {
+                map.put("skinSignature", skinSignature);
+            }
+        }
         if (entityTypeName != null) map.put("entityTypeName", entityTypeName);
         map.put("customTeleportCost", customTeleportCost);
+        map.put("shopItemTradeMode", shopItemTradeMode);
+
+        // giftPacks
+        List<Map<String, Object>> packList = new ArrayList<>();
+        for (GiftPack pack : giftPacks) {
+            packList.add(pack.toMap());
+        }
+        map.put("giftPacks", packList);
 
         return map;
     }
@@ -236,13 +279,23 @@ public class PhilosNPC {
         npc.ownerName = (String) map.get("ownerName");
         npc.ownerUuid = UUID.fromString((String) map.get("ownerUuid"));
         npc.location = deserializeLocation((Map<String, Object>) map.get("location"));
-        npc.pose = NPCPose.valueOf((String) map.get("pose"));
+        // 记录存档中的世界名（世界未加载时 getWorld() 为 null，靠它做世界键控）
+        Map<String, Object> locMap = (Map<String, Object>) map.get("location");
+        if (locMap != null && locMap.get("world") instanceof String w) {
+            npc.worldName = w;
+        }
+        npc.pose = NPCPose.parse((String) map.get("pose"));
         npc.scale = ((Number) map.get("scale")).doubleValue();
+        npc.skinValue = (String) map.get("skinValue");
+        npc.skinSignature = (String) map.get("skinSignature");
 
         List<String> featureNames = (List<String>) map.get("features");
         if (featureNames != null) {
             for (String name : featureNames) {
-                npc.features.add(FeatureType.valueOf(name));
+                // 容错：跳过已删除的功能类型（如旧数据的JUKEBOX），避免加载崩溃
+                try {
+                    npc.features.add(FeatureType.valueOf(name));
+                } catch (IllegalArgumentException ignored) {}
             }
         }
 
@@ -282,18 +335,10 @@ public class PhilosNPC {
 
         // teleportTarget
         if (map.containsKey("teleportTarget")) {
-            npc.teleportTarget = deserializeLocation((Map<String, Object>) map.get("teleportTarget"));
-        }
-
-        // jukeboxDiscs
-        List<Map<String, Object>> jukeboxList = (List<Map<String, Object>>) map.get("jukeboxDiscs");
-        if (jukeboxList != null) {
-            npc.jukeboxDiscs = new ItemStack[9];
-            for (int i = 0; i < 9 && i < jukeboxList.size(); i++) {
-                Map<String, Object> itemMap = jukeboxList.get(i);
-                if (itemMap != null) {
-                    npc.jukeboxDiscs[i] = ItemStack.deserialize(itemMap);
-                }
+            Map<String, Object> targetMap = (Map<String, Object>) map.get("teleportTarget");
+            npc.teleportTarget = deserializeLocation(targetMap);
+            if (targetMap != null && targetMap.get("world") instanceof String targetWorld) {
+                npc.teleportTargetWorldName = targetWorld;
             }
         }
 
@@ -302,16 +347,29 @@ public class PhilosNPC {
         npc.npcType = map.containsKey("npcType") ? NPCType.valueOf((String) map.get("npcType")) : NPCType.PERSONAL;
         npc.entityTypeName = (String) map.get("entityTypeName");
         npc.customTeleportCost = map.containsKey("customTeleportCost") ? ((Number) map.get("customTeleportCost")).doubleValue() : -1;
+        npc.shopItemTradeMode = map.containsKey("shopItemTradeMode") && (Boolean) map.get("shopItemTradeMode");
+
+        // giftPacks
+        List<Map<String, Object>> packList = (List<Map<String, Object>>) map.get("giftPacks");
+        if (packList != null) {
+            for (Map<String, Object> packMap : packList) {
+                npc.giftPacks.add(GiftPack.fromMap(packMap));
+            }
+        }
 
         return npc;
     }
 
     // ===== Location 序列化辅助 =====
 
-    private static Map<String, Object> serializeLocation(Location loc) {
+    private static Map<String, Object> serializeLocation(Location loc, String fallbackWorldName) {
         if (loc == null) return null;
+        String world = loc.getWorld() == null ? fallbackWorldName : loc.getWorld().getName();
+        if (world == null || world.isBlank()) {
+            throw new IllegalStateException("无法保存世界未加载且没有已保存世界名的NPC位置");
+        }
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("world", loc.getWorld().getName());
+        map.put("world", world);
         map.put("x", loc.getX());
         map.put("y", loc.getY());
         map.put("z", loc.getZ());

@@ -1,16 +1,16 @@
-name: ${pluginName}
+name: '${pluginName}'
 version: '${version}'
 main: com.phcraft.philosnpc.PhilosNPCPlugin
 api-version: '${apiVersion}'
 author: PhCraft Team
-description: 功能NPC插件 - 创建可交互的玩家/系统NPC，支持商店/传送/点歌/留言
+description: 功能NPC插件 - 创建可交互的玩家/系统NPC，支持商店/传送/留言/礼包/跨世界转移
 depend:
   - Vault
 
 commands:
   philosnpc:
     description: PhilosNPC 主命令
-    usage: /philosnpc <create|syscreate|list|edit|move|delete|tp|reload>
+    usage: /philosnpc <create|syscreate|list|edit|move|delete|tp|reload|reconcileteleport|reconcileshop|help>
     aliases:
       - pnpc
 

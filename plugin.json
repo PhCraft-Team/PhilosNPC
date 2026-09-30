@@ -1,11 +1,11 @@
 {
   "pluginName": "PhilosNPC",
-  "version": "1.2.0",
+  "version": "1.4.3",
   "group": "com.phcraft",
   "javaVersion": 25,
-  "gradleVersion": "9.1.0",
+  "gradleVersion": "9.4.0",
   "paperVersion": "26.3.build.19-alpha",
   "apiVersion": "26.3",
   "releaseEnabled": false,
-  "compatibility": "运行需 Java 25、Paper 26.3 alpha；仅供隔离测试，未完成真人操作验收。Vault 相关功能需经济服务。"
+  "compatibility": "预研目标为 Paper 26.3.build.19-alpha，运行需 Java 25；不兼容旧版 Paper、Spigot 或 Folia。经济功能需 Vault 与可用的 Vault Economy 服务；PacketEvents 2.13.0 内置并重定位。当前候选仅供隔离测试，未在正式服验证。"
 }

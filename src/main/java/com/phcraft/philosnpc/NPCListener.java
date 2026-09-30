@@ -2,6 +2,7 @@ package com.phcraft.philosnpc;
 
 import com.phcraft.philosnpc.gui.GuiManager;
 import com.phcraft.philosnpc.npc.PhilosNPC;
+
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -18,9 +19,13 @@ public class NPCListener implements Listener {
         if (!pdc.has(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING)) return;
 
         event.setCancelled(true);
+        handleNpcInteract(event.getPlayer(), pdc.get(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING));
+    }
 
-        Player player = event.getPlayer();
-        String npcId = pdc.get(PhilosNPCPlugin.npcIdKey(), PersistentDataType.STRING);
+    /**
+     * NPC右键交互统一入口（生物型NPC走Bukkit事件，玩家形态NPC走包监听）
+     */
+    public static void handleNpcInteract(Player player, String npcId) {
         PhilosNPC npc = PhilosNPCPlugin.instance().npcManager().getNPC(npcId);
         if (npc == null) return;
 

@@ -1,44 +1,47 @@
 # PhilosNPC
 
-> Paper 26.3 预研分支：编译目标固定为 `26.3.build.19-alpha`，运行需 Java 25。产物仅供隔离测试，验证结果见 `PAPER_26_3.md`；暂不作为正式服升级依据。
+> Paper 26.3 预研：候选构建面向 `26.3.build.19-alpha`，需要 Java 25。此分支不发布正式 Release，只供隔离测试；兼容范围和验证限制见 [PAPER_26_3.md](PAPER_26_3.md)。
 
 ![Java](https://img.shields.io/badge/Java-25-orange)
-![Paper](https://img.shields.io/badge/Paper-1.21+-green)
+![Paper](https://img.shields.io/badge/Paper-26.3--alpha-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-功能NPC插件 - 在游戏内创建可交互的玩家NPC和系统NPC，支持商店、传送、点歌、留言等功能。
+功能NPC插件 - 在游戏内创建可交互的玩家NPC和系统NPC，支持商店、传送、留言、礼包、跨世界转移等功能。
 
 ## 功能
 
 ### 个人NPC
-- 花费500金币在当前位置生成与玩家外观相同的NPC
-- GUI管理姿势、大小、功能
-- 4种功能（每个NPC最多4个）：
-  - **商店**：村民式交易界面，共享商店背包，支持物物交换
+- 花费500金币在当前位置生成与玩家外观相同的NPC（默认无装备，不影响已有NPC）
+- GUI管理姿势（13种）、大小、功能
+- 可用功能（每个NPC最多5个）：
+  - **商店**：村民式交易界面，支持金币购买与以物换物，收购的物品进入共享收购背包
   - **传送**：固定5金币传送到设定坐标，支持传送后奖励命令
-  - **点歌台**：放入唱片供玩家点播播放
   - **留言板**：每个NPC独立留言，支持多行
+- 主人会在其他玩家使用自己NPC功能（金币消费、以物换物、传送、查看留言）时收到通知，自己使用不打扰
+- 礼包发放与跨世界转移为系统NPC专属，个人NPC界面中显示为灰色锁定项
 
 ### 系统NPC（管理员创建）
 - **任意生物形态**：可设定为ZOMBIE、SKELETON、CREEPER等任意生物
 - **玩家皮肤**：输入 `PLAYER:玩家名` 显示对应正版皮肤
 - **无限商店**：商店物品无限售卖不需补货，支持金币购买和以物换物
 - **自定义传送费用**：管理员可设置传送价格（0=免费）
-- **直接与系统交易**：玩家交易直接与系统发生，无需店主管理库存
+- **礼包发放**：每位玩家限领一次管理员设置的礼包
+- **跨世界转移**：白名单物品转移仓库，在RPG世界与主世界之间安全转移（见下）
 
 ### 通用特性
 - NPC管理：创建、编辑、移动、删除、传送至NPC
-- 持久化：NPC不会因区块卸载而消失
+- 持久化：NPC不会因区块卸载而消失；服务器异常重启后自动清理孤儿实体，防止NPC重复生成
 - 头部动画：NPC头部会随机左右转动
+- 世界隔离：共享商店背包与收购背包按"玩家 + 世界"隔离存储，RPG世界与主世界互不串档
 
 ## 安装
 
-1. 下载 `PhilosNPC-1.1.0.jar`
-2. 放入服务器 `plugins/` 目录
-3. 重启服务器
-4. 安装 Vault 经济插件（必需）
+1. 从 GitHub Actions 的本次运行中下载并解压临时构建产物 `PhilosNPC-1.4.3.jar`
+2. 仅放入隔离测试服的 `plugins/` 目录
+3. 安装 Vault 和可用的 Vault Economy 服务
+4. 重启测试服并检查启动日志
 
-> 需要 **Java 25** 运行环境，支持 Paper 1.21 及以上版本
+> 需要 **Java 25** 和 Paper `26.3.build.19-alpha`。本候选包不兼容 Paper 旧版、Spigot 或 Folia，也不是正式 Release。
 
 ## 命令
 
@@ -52,6 +55,8 @@
 | `/pnpc delete <id>` | 删除NPC | `philosnpc.create` |
 | `/pnpc tp <id>` | 传送到NPC（10金币） | `philosnpc.create` |
 | `/pnpc reload` | 重载配置 | `philosnpc.admin` |
+| `/pnpc reconcileshop <UUID>` | 核对商店账本后解除商店付款锁（玩家需在线） | `philosnpc.admin` |
+| `/pnpc reconcileteleport <UUID>` | 核对传送账本后解除传送付款锁（玩家需在线） | `philosnpc.admin` |
 
 ### 系统NPC类型示例
 ```
@@ -61,25 +66,23 @@
 /pnpc syscreate PLAYER:Notch    # 显示Notch皮肤的玩家NPC
 ```
 
+## 跨世界转移
+
+系统NPC的"跨世界转移"功能提供一个转移仓库，只有白名单内的物品可以存入：
+
+- 白名单匹配物品的 `rpgforge:item-id` 标签（RPGForge 物品ID），原版物品无法入仓
+- 在 `config.yml` 的 `transfer.allowed-rpgforge-ids` 中配置放行的物品ID，默认只放行 `rpg_token`
+- 修改后执行 `/pnpc reload` 生效，无需重启
+
 ## 交互
 
 - **右键NPC**：打开功能选择界面（顾客视角）
 - **Shift+右键NPC**：打开管理界面（仅限NPC主人或管理员）
-- 个人NPC商店背包在同一个玩家的所有NPC之间共享
+- 个人NPC的商店背包与收购背包在同一玩家的所有NPC之间共享，并按世界隔离
+- 不能与自己的NPC交易，防止利用收购背包刷物品
 
 ## 文档
 
 完整中文Wiki：https://github.com/PhCraft-Team/PhilosNPC/wiki
 
-## 构建和检查
-
-构建配置放在 `plugin.json`。提交 PR 后，GitHub Actions 会检查中文标题、运行构建和测试、核对 JAR 的名称与版本，并上传保留 7 天的构建包。
-
-本预研分支的 `releaseEnabled` 为 `false`，合并后也不会自动发布正式版。修改或升级依赖前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-本地检查：
-
-```bash
-python -X utf8 -m unittest discover -s .github/scripts -p 'test_*.py' -v
-gradle --no-daemon clean build
-```
+旧库存迁移暂停与逐世界人工核账步骤见[库存迁移恢复说明](docs/inventory-migration-recovery.md)。

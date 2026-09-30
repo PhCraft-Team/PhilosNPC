@@ -55,5 +55,8 @@ public class MessageFeature {
         }
         player.sendMessage(PhilosNPCPlugin.cc(
                 "&7&m---------------------------------"));
+        // 查看成功通知主人（系统NPC与本人查看由notify内部过滤）
+        UsageNotify.notify(npc, player,
+                "&e" + player.getName() + " &a查看了你在 &f" + npc.getDisplayName() + " &a的留言");
     }
 }

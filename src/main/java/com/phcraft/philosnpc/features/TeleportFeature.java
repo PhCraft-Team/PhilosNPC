@@ -1,6 +1,7 @@
 package com.phcraft.philosnpc.features;
 
 import com.phcraft.philosnpc.PhilosNPCPlugin;
+import com.phcraft.philosnpc.PluginSettings;
 import com.phcraft.philosnpc.npc.PhilosNPC;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Location;
@@ -12,7 +13,6 @@ import org.bukkit.entity.Player;
  */
 public class TeleportFeature {
 
-    private static final double TELEPORT_COST = 5.0;
     private static final org.bukkit.NamespacedKey UNRESOLVED_PAYMENT =
             new org.bukkit.NamespacedKey("philosnpc", "unresolved_teleport_payment");
 
@@ -43,7 +43,7 @@ public class TeleportFeature {
 
     /**
      * 执行传送
-     * 扣除费用（给系统），传送到目标点
+     * 经安全付款通道扣除费用，传送失败自动退款
      * @param player 玩家
      * @param npc NPC对象
      * @return 是否传送成功
@@ -58,10 +58,17 @@ public class TeleportFeature {
         }
 
         double cost = npc.getEffectiveTeleportCost();
-
-        return teleport(player, target, cost);
+        if (!teleport(player, target, cost)) return false;
+        // 使用成功通知主人（系统NPC与本人使用由notify内部过滤）
+        UsageNotify.notify(npc, player,
+                "&e" + player.getName() + " &a使用了你的 &f" + npc.getDisplayName() + " &a的传送功能");
+        return true;
     }
 
+    /**
+     * 安全付费传送：付款结果未知或退款失败都会在玩家 PDC 留下付款锁，
+     * 暂停其后续收费传送，待管理员核对账本后用 reconcile 解除。
+     */
     public static boolean teleport(Player player, Location target, double cost) {
         if (target == null || target.getWorld() == null || !Double.isFinite(cost) || cost < 0) {
             player.sendMessage(PhilosNPCPlugin.cc("&c传送目标或费用无效"));
@@ -84,6 +91,11 @@ public class TeleportFeature {
         }
         boolean teleported;
         try {
+            // 传送前结束本插件会话；保留其他插件当前打开的容器。
+            PhilosNPCPlugin plugin = PhilosNPCPlugin.instance();
+            if (plugin != null && plugin.guiManager() != null) {
+                plugin.guiManager().closeNpcSession(player);
+            }
             teleported = player.teleport(target);
         } catch (RuntimeException ex) {
             teleported = false;
@@ -111,10 +123,9 @@ public class TeleportFeature {
     }
 
     /**
-     * 获取传送费用
-     * @return 传送费用（固定5.0）
+     * 获取传送费用（config.yml 的 teleport-feature-cost，可 /pnpc reload 热调）
      */
     public static double getTeleportCost() {
-        return TELEPORT_COST;
+        return PluginSettings.teleportFeatureCost();
     }
 }

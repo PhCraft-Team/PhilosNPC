@@ -1,40 +1,35 @@
-# Paper 26.3 适配与代码评审
+# Paper 26.3 适配预研
 
-- 分支：`compat/paper-26.3`；基线：`master` / `55fef3c616f75a8d29aeb0e35309772993b1882e`。
-- 目标固定 Paper `26.3.build.19-alpha`、Java 25。验证于 2026-09-19，Oracle JDK 25.0.4.1 / Gradle 9.1.0。
-- 本次不合并、不发布、不部署正式服；等待维护者审核决定。此分支包含 ALPHA 适配，不能作为当前旧版本正式服的修复包直接部署。
+- 分支：`compat/paper-26.3`
+- 最新基线：`master` / `80d27e5715c405fa1783aab91b041eebadc64ed1`（含已合并的库存迁移、支付安全和界面会话修复）
+- 固定目标：Paper `26.3.build.19-alpha`，Java 25；项目构建使用 Gradle 9.4.0。
+- Shadow Gradle 插件使用 `9.5.0`，该版本更新 ASM/jdependency 以支持新版 class 文件；打包仍执行 PacketEvents 重定位并排除其重复 `plugin.yml`。
+- 插件版本沿用 `1.4.3`；Paper API 和 `plugin.yml` 的 `api-version` 为 `26.3`。`releaseEnabled` 保持 `false`，候选包仅通过 Actions 临时产物提供。
 
-## 评审修复
+## 本次改动
 
-- 个人商店自购不再扣款；检查店主入账结果，明确入账失败时退款。经济提供者抛异常、返回空结果或退款失败时停止发货、记录对账信息并暂停该玩家本次插件运行期间的购买，避免自动重试未知付款。
-- 共享库存编辑期间拒绝购买和第二个编辑窗口；停用插件前关闭界面、保存已编辑库存。物物交换先在副本验证库存与收款空间，成功后把付款物品存入店主背包。
-- 收费传送在无经济服务时拒绝执行；检查 teleport 返回值，传送被取消时退款。拒绝 NaN/Infinity 价格；聊天编辑统一回主线程并复核所有者/管理员权限。
+- 将构建目标更新到 Paper 26.3 和 Java 25，保留当前主线的 PacketEvents 打包、库存迁移保护、商店编辑会话和支付安全逻辑。
+- 将 Shadow 升到 `9.5.0`，使 Paper 26.3 / Java 25 生成的 class 文件可经既有 PacketEvents 重定位打包；JAR 去重规则不变。
+- 将商店付款结果不明的锁定写入玩家 PDC 并立即保存；管理员核对经济账本后，可用 `/pnpc reconcileshop <在线玩家UUID>` 单独解除商店锁，或用 `/pnpc reconcileteleport <在线玩家UUID>` 单独解除传送锁。两个命令不会自动扣款或退款，也不会解除另一类锁。
 
-## 实际验证
+## 实际测试
 
-- `gradle --no-daemon clean build`：通过。
-- 13 项 JUnit 回归测试通过：自购、收款失败、退款失败、未知付款、非法价格、取消传送退款、缺失经济服务等。
-- 10 个组织插件共同加载于 localhost 隔离世界，三个更新后的插件均启用并正常停服；RPG 示例三类配方继续可读。
-- 依赖环境：VaultUnlocked 2.20.1、EssentialsX 2.22.0、LuckPerms 5.5.85；经济服务注册存在。
-- `git diff --check`、JAR 的插件名称/版本/API 声明及入口类检查。
-- JAR：`PhilosNPC-1.2.0.jar`，SHA-256：`31a95c0a2ee9db706e4c727345a279a1f0b597e1b2889d8b6a19792323723dd9`。
+- `python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v`：34 项通过。
+- Java `25.0.4.1`、Gradle `9.4.0` 下执行 `clean test --offline --info`：主代码和测试代码以 JDK 25 编译，39 项 JUnit 通过。因本地无网络且缓存中没有 Shadow `9.5.0`，此项只验证编译及测试；该运行使用本地缓存的 Shadow `9.0.0-beta12`，没有执行 JAR 打包。
+- 最终候选的 `clean build`、JUnit 和 JAR 检查由本次 PR 的 GitHub Actions 使用配置中的 Shadow `9.5.0` 执行；结果以该工作流为准。
+- 没有对本次整合后的候选包启动 Paper 26.3 服务端或进行游戏内交易验证。此前旧提交上的测试服经历不代表本候选已验证。
 
-## 影响与验证边界
+## 已知限制
 
-余额与库存格式不变。共享库存编辑时暂停售卖。Vault 不提供跨账户/磁盘事务；提供者结果未知或进程崩溃后的对账仍需管理员处理，不声明支持崩溃级原子结算。
+- Paper 目标仍为 `26.3.build.19-alpha` 预研版；不据此宣称支持旧版 Paper、Spigot 或 Folia。
+- Vault 不提供跨账户事务；发生不确定结果时管理员需先核对经济账本，再解除对应玩家的付款锁。
+- 当前变更没有启动正式服、迁移正式数据或创建 Release。
 
-测试覆盖自动化回归与隔离服探针，未完成真人客户端的全部 GUI、多人交易、正式数据副本迁移或 Linux 验收。EssentialsX 仍报告不支持此 ALPHA 服务端；注册成功不等于经济系统已获生产认证。Windows 性能计数器告警未通过修改系统设置掩盖。
+## 升级影响
 
-Paper 目标仍是 ALPHA；不宣称兼容 Spigot、Folia 或所有后续 26.3 构建。升级前应另行备份世界、玩家、配置、插件及经济数据；回滚应恢复匹配备份，不仅降级 JAR。通用修复若要提前部署旧服，应单独移植到旧 API 分支并重新验收。
-
-## Review 跟进（2026-09-19）
-
-- 未知传送扣款、失败/未知退款会在玩家 PDC 写入 `philosnpc:unresolved_teleport_payment` 并调用 `saveData()`。标记未解除前，所有收费传送入口（含 `/npc tp`）在调用 Vault 前拒绝执行；免费传送不受影响。
-- 管理员先按日志核对提供者账本，必要时在经济系统中人工补偿；之后使用 `/npc reconcileteleport <在线玩家UUID>` 解锁（沿用 `philosnpc.admin`）。命令仅清除状态并记录操作者，不重复扣款或退款。不要用删除玩家数据或降级插件跳过对账。
-- 新增回归覆盖返回 null、抛异常、失败退款、连续重试、恢复的持久容器、解锁后恢复以及免费传送。JUnit 总数 13。持久化采用 Bukkit 玩家保存机制，不声明跨进程崩溃事务保证。
-
-## 自动构建
-
-已补入 `PhCraft-Team/plugin-template` 的工作流、产物检查脚本、PR 模板和开发规范（来源提交 `97dde7a`）。版本、Java、Gradle 和 Paper 配置统一从 `plugin.json` 读取，`releaseEnabled` 保持 `false`。
-
-PR 会自动检查中文标题、构建、运行已有插件测试和 34 项脚本测试、校验 JAR，并上传保留 7 天的构建包。本地构建及这些检查已通过。
+- 配置和存储：无新增配置项。本分支包含 master 的分世界库存迁移和歧义库存保护；旧格式数据仍按该迁移备份并按需人工核对，本 PR 没有另加库存转换步骤。
+- 权限、命令和 API：沿用现有 `philosnpc.admin` 与 `reconcileteleport` 命令；新增 `reconcileshop`，两类付款锁需分别核账和解除。
+- 玩家数据：发生不确定商店付款后，新增 `philosnpc:unresolved_shop_payment` 玩家 PDC 字段；必须经管理员核对账本后解锁。
+- 插件依赖：Vault 和内置重定位的 PacketEvents 依赖保持不变。
+- 破坏性变更：候选 JAR 需要 Java 25 和 Paper 26.3；不能安装在旧 Paper、Spigot 或 Folia 服务端。
+- 升级及回滚：仅在隔离测试副本替换候选 JAR，并先备份插件、玩家、世界及经济数据；升级时遵循分世界库存迁移和人工核账保护。回滚时停服并恢复对应备份。

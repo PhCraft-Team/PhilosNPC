@@ -2,29 +2,48 @@ import groovy.json.JsonSlurper
 
 plugins {
     id 'java'
+    id 'com.gradleup.shadow' version '9.5.0'
 }
 
 def pluginConfig = new JsonSlurper().parse(file('plugin.json'))
+def mockitoVersion = '5.17.0'
 group = pluginConfig.group
 version = pluginConfig.version
 
 repositories {
     mavenCentral()
-    maven {
-        name = 'papermc'
-        url = 'https://repo.papermc.io/repository/maven-public/'
-    }
-    maven {
-        name = 'jitpack'
-        url = 'https://jitpack.io'
-    }
+    maven { url = uri('https://repo.papermc.io/repository/maven-public/') }
+    maven { url = uri('https://jitpack.io') }
+    maven { url = uri('https://repo.codemc.io/repository/maven-releases/') }
+}
+
+configurations {
+    mockitoAgent
 }
 
 dependencies {
     compileOnly "io.papermc.paper:paper-api:${pluginConfig.paperVersion}"
+    // Vault 经济 API；排除其内嵌的旧版 bukkit，避免与 paper-api 冲突
     compileOnly('com.github.MilkBowl:VaultAPI:1.7') {
         exclude group: 'org.bukkit', module: 'bukkit'
     }
+    // packetevents 打包进 JAR 并重定位，避免与其他插件自带版本冲突
+    implementation 'com.github.retrooper:packetevents-spigot:2.13.0'
+    testImplementation platform('org.junit:junit-bom:5.12.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation "org.mockito:mockito-core:${mockitoVersion}"
+    mockitoAgent("org.mockito:mockito-core:${mockitoVersion}") { transitive = false }
+    testImplementation "io.papermc.paper:paper-api:${pluginConfig.paperVersion}"
+    testImplementation('com.github.MilkBowl:VaultAPI:1.7') {
+        exclude group: 'org.bukkit', module: 'bukkit'
+    }
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // JDK 25+ 类文件版本超出 Mockito 内置 ByteBuddy 支持范围，实验模式放行（CI 的 Java 21 无副作用）
+    jvmArgs "-javaagent:${configurations.mockitoAgent.singleFile.absolutePath}", '-Dnet.bytebuddy.experimental=true'
 }
 
 java {
@@ -32,24 +51,33 @@ java {
     targetCompatibility = JavaVersion.toVersion(pluginConfig.javaVersion)
 }
 
-tasks.processResources {
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = pluginConfig.javaVersion
+}
+
+processResources {
     def values = [pluginName: pluginConfig.pluginName, version: project.version,
                   apiVersion: pluginConfig.apiVersion]
     inputs.properties(values)
     filesMatching('plugin.yml') { expand(values) }
 }
 
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
+shadowJar {
+    archiveBaseName = pluginConfig.pluginName
+    archiveClassifier = ''
+    relocate 'com.github.retrooper', 'com.phcraft.philosnpc.libs.packetevents.api'
+    relocate 'io.github.retrooper', 'com.phcraft.philosnpc.libs.packetevents.spigot'
+    // packetevents-spigot 自带 plugin.yml（主类 io.github.retrooper.packetevents.PacketEventsPlugin），
+    // 与我们的重复后 Paper 可能读到它并报 ClassNotFoundException，去重只保留先加入的自己的
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// 对真实故障路径做回归；编译期服务器 API 也供测试使用。
-configurations.testImplementation.extendsFrom(configurations.compileOnly)
-dependencies {
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.12.1'
-    testImplementation 'org.mockito:mockito-core:5.20.0'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.12.1'
+// 禁用普通jar：与 shadowJar 同名输出会互相覆盖
+tasks.jar {
+    enabled = false
 }
-tasks.test { useJUnitPlatform() }
 
-jar { archiveBaseName = pluginConfig.pluginName }
+tasks.assemble {
+    dependsOn tasks.shadowJar
+}
