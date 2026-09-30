@@ -80,3 +80,5 @@
 ## 文档
 
 完整中文Wiki：https://github.com/PhCraft-Team/PhilosNPC/wiki
+
+旧库存迁移暂停与逐世界人工核账步骤见[库存迁移恢复说明](docs/inventory-migration-recovery.md)。

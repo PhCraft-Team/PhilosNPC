@@ -16,11 +16,15 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.MockedStatic;
 
 import java.lang.reflect.Field;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -33,24 +37,29 @@ import static org.mockito.Mockito.when;
 
 class NPCManagerRemovalGuardTest {
     private final UUID ownerId = UUID.randomUUID();
+    private final List<World> worlds = new ArrayList<>();
 
     @Test
     void deletingLastNpcChecksInventoryAfterOpenEditorWasFlushed(@TempDir Path dataDir)
-            throws ReflectiveOperationException {
+            throws ReflectiveOperationException, IOException {
         PhilosNPCPlugin plugin = mock(PhilosNPCPlugin.class);
         try (MockedStatic<PhilosNPCPlugin> pluginStatic =
                      mockStatic(PhilosNPCPlugin.class, CALLS_REAL_METHODS);
              MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class, CALLS_REAL_METHODS)) {
             pluginStatic.when(PhilosNPCPlugin::instance).thenReturn(plugin);
             when(plugin.getDataFolder()).thenReturn(dataDir.toFile());
+            when(plugin.getLogger()).thenReturn(Logger.getLogger("npc-removal-guard-tests"));
+            Files.writeString(dataDir.resolve("npcs.yml"), "inventory-format: 2\nnpcs: []\n");
 
             NPCManager manager = new NPCManager();
+            manager.loadAll();
             when(plugin.npcManager()).thenReturn(manager);
             GuiManager gui = new GuiManager();
             when(plugin.guiManager()).thenReturn(gui);
 
             World world = mock(World.class);
             when(world.getName()).thenReturn("world");
+            worlds.add(world);
             PhilosNPC npc = new PhilosNPC("Owner", ownerId, new Location(world, 1, 64, 1));
             npc.setId("npc-last");
             addNpc(manager, npc);
@@ -64,8 +73,10 @@ class NPCManagerRemovalGuardTest {
             GuiManager.GuiState state = shopState(npc);
             when(top.getHolder()).thenReturn(state);
             ItemStack storedStock = mock(ItemStack.class);
+            Material itemType = mock(Material.class);
+            when(itemType.isAir()).thenReturn(false);
             when(storedStock.clone()).thenReturn(storedStock);
-            when(storedStock.getType()).thenReturn(Material.DIAMOND);
+            when(storedStock.getType()).thenReturn(itemType);
             when(top.getItem(0)).thenReturn(storedStock);
             InventoryView view = mock(InventoryView.class);
             when(view.getTopInventory()).thenReturn(top);
@@ -94,7 +105,9 @@ class NPCManagerRemovalGuardTest {
         PhilosNPC sibling = npc("npc-b", "world");
         ItemStack[] stock = new ItemStack[36];
         ItemStack stockItem = mock(ItemStack.class);
-        when(stockItem.getType()).thenReturn(Material.DIAMOND);
+        Material itemType = mock(Material.class);
+        when(itemType.isAir()).thenReturn(false);
+        when(stockItem.getType()).thenReturn(itemType);
         stock[0] = stockItem;
 
         assertFalse(NPCManager.wouldLoseShopInventoryOnRemoval(
@@ -104,6 +117,7 @@ class NPCManagerRemovalGuardTest {
     private PhilosNPC npc(String id, String worldName) {
         World world = mock(World.class);
         when(world.getName()).thenReturn(worldName);
+        worlds.add(world);
         PhilosNPC npc = new PhilosNPC("Owner", ownerId, new Location(world, 0, 64, 0));
         npc.setId(id);
         return npc;

@@ -6,9 +6,12 @@ import com.phcraft.philosnpc.features.ShopTrade;
 import com.phcraft.philosnpc.features.UsageNotify;
 import com.phcraft.philosnpc.npc.NPCManager;
 import com.phcraft.philosnpc.npc.PhilosNPC;
+import io.papermc.paper.registry.RegistryAccess;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.Registry;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
@@ -36,6 +39,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,10 +49,12 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,11 +66,21 @@ class GuiManagerLifecycleTest {
     private NPCManager npcManager;
     private GuiManager gui;
     private MockedStatic<PhilosNPCPlugin> pluginStatic;
+    private MockedStatic<RegistryAccess> registryAccessStatic;
 
     @BeforeEach
     void setUp() {
         plugin = mock(PhilosNPCPlugin.class);
+        when(plugin.getLogger()).thenReturn(Logger.getLogger("npc-gui-lifecycle-tests"));
+
+        RegistryAccess registryAccess = mock(RegistryAccess.class, RETURNS_DEEP_STUBS);
+        registryAccessStatic = mockStatic(RegistryAccess.class);
+        registryAccessStatic.when(RegistryAccess::registryAccess).thenReturn(registryAccess);
+        Registry sounds = Registry.SOUNDS;
+        doReturn(null).when(sounds).getOrThrow(any(NamespacedKey.class));
+
         npcManager = mock(NPCManager.class);
+        when(npcManager.isStorageReady()).thenReturn(true);
         pluginStatic = mockStatic(PhilosNPCPlugin.class, CALLS_REAL_METHODS);
         pluginStatic.when(PhilosNPCPlugin::instance).thenReturn(plugin);
         when(plugin.npcManager()).thenReturn(npcManager);
@@ -73,7 +89,8 @@ class GuiManagerLifecycleTest {
 
     @AfterEach
     void tearDown() {
-        pluginStatic.close();
+        if (pluginStatic != null) pluginStatic.close();
+        if (registryAccessStatic != null) registryAccessStatic.close();
     }
 
     @Test
@@ -314,6 +331,8 @@ class GuiManagerLifecycleTest {
         PhilosNPC npc = personalNpc("npc-a", "world");
         ItemStack result = itemStack(1);
         ShopTrade trade = new ShopTrade(result, 12.0, 5);
+        when(npc.getTrades()).thenReturn(List.of(trade));
+        when(npcManager.getNPC("npc-a")).thenReturn(npc);
         MerchantInventory merchant = merchantInventory(result);
         installMerchantSession(player, npc, trade);
         when(npcManager.isShopInventoryLocked(ownerId, "world")).thenReturn(true);
@@ -337,6 +356,8 @@ class GuiManagerLifecycleTest {
         ItemStack price = itemStack(2, Material.EMERALD);
         ItemStack priceInSlot = price.clone();
         ShopTrade trade = new ShopTrade(result, price, null, 5);
+        when(npc.getTrades()).thenReturn(List.of(trade));
+        when(npcManager.getNPC("npc-a")).thenReturn(npc);
         MerchantInventory merchant = merchantInventory(result);
         when(merchant.getItem(0)).thenReturn(priceInSlot);
         installMerchantSession(player, npc, trade);
@@ -368,6 +389,8 @@ class GuiManagerLifecycleTest {
         PhilosNPC npc = personalNpc("npc-a", "world");
         ItemStack result = itemStack(1);
         ShopTrade trade = new ShopTrade(result, 12.0, 5);
+        when(npc.getTrades()).thenReturn(List.of(trade));
+        when(npcManager.getNPC("npc-a")).thenReturn(npc);
         MerchantInventory merchant = merchantInventory(result);
         InventoryView merchantView = view(merchant);
         when(player.getOpenInventory()).thenReturn(merchantView);
@@ -380,9 +403,22 @@ class GuiManagerLifecycleTest {
         pluginStatic.when(PhilosNPCPlugin::economy).thenReturn(economy);
         doThrow(new IllegalStateException("Vault provider failed"))
                 .when(economy).withdrawPlayer(player, 12.0);
+        OfflinePlayer seller = mock(OfflinePlayer.class);
+        when(seller.getUniqueId()).thenReturn(ownerId);
 
-        assertThrows(IllegalStateException.class,
-                () -> gui.onInventoryClick(merchantClick(player, merchant)));
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class, CALLS_REAL_METHODS)) {
+            bukkit.when(() -> Bukkit.getOfflinePlayer(ownerId)).thenReturn(seller);
+
+            gui.onInventoryClick(merchantClick(player, merchant));
+            // The payment helper converts a provider exception into UNCERTAIN, then blocks retries.
+            gui.onInventoryClick(merchantClick(player, merchant));
+        }
+
+        verify(economy, times(1)).withdrawPlayer(player, 12.0);
+        verify(economy, never()).depositPlayer(any(OfflinePlayer.class), anyDouble());
+        verify(npcManager, never()).setSharedShopInventory(eq(ownerId), eq("world"), any());
+        verify(player, never()).getInventory();
+        assertTrue(trade.canUse());
 
         Inventory editor = inventory(45);
         InventoryView editorView = view(editor);
@@ -419,9 +455,11 @@ class GuiManagerLifecycleTest {
 
     private ItemStack itemStack(int amount, Material material) {
         ItemStack item = mock(ItemStack.class);
+        Material itemType = mock(Material.class);
+        when(itemType.isAir()).thenReturn(false);
         when(item.clone()).thenReturn(item);
         when(item.getAmount()).thenReturn(amount);
-        when(item.getType()).thenReturn(material);
+        when(item.getType()).thenReturn(itemType);
         when(item.isSimilar(any(ItemStack.class))).thenReturn(true);
         return item;
     }
