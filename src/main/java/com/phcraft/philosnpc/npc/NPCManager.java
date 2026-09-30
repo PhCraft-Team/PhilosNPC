@@ -13,6 +13,7 @@ import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.LivingEntity;
@@ -43,6 +44,10 @@ public class NPCManager {
     // 跨世界转移仓库：按玩家UUID（天生跨世界），只存白名单物品，独立文件存储
     private final Map<UUID, List<ItemStack>> transferVaults;
     private final File transferFile;
+    // Owners whose legacy copies cannot safely be assigned to worlds; their NPC rows stay independent.
+    private final Map<UUID, Set<String>> shopInventoryMigrationReviews = new LinkedHashMap<>();
+    // A failed load or migration write must never be followed by saveAll replacing the source file.
+    private boolean storageReady;
     // 商店背包编辑锁：scopeKey → 编辑者UUID（编辑期间冻结同店主同世界的交易，防止关闭时旧副本覆盖交易结果）
     private final Map<String, UUID> shopEditLocks = new HashMap<>();
     // 村民式头部动画状态（entityId -> 状态）
@@ -78,174 +83,223 @@ public class NPCManager {
 
     @SuppressWarnings("unchecked")
     public void loadAll() {
+        storageReady = false;
+        npcs.clear();
+        sharedShopInventories.clear();
+        collectionBackpacks.clear();
+        transferVaults.clear();
+        shopInventoryMigrationReviews.clear();
+        shopEditLocks.clear();
+
         if (!dataFile.exists()) {
-            plugin.saveResource("npcs.yml", false);
+            try {
+                plugin.saveResource("npcs.yml", false);
+            } catch (RuntimeException e) {
+                plugin.getLogger().severe("创建NPC数据文件失败，已禁用保存以保护现有数据: " + e.getMessage());
+                return;
+            }
         }
 
-        FileConfiguration config = YamlConfiguration.loadConfiguration(dataFile);
-        if (config.contains("npcs")) {
-            List<Map<?, ?>> npcList = config.getMapList("npcs");
-            for (Map<?, ?> rawMap : npcList) {
-                Map<String, Object> map = (Map<String, Object>) rawMap;
-                PhilosNPC npc = PhilosNPC.fromMap(map);
-                npcs.put(npc.getId(), npc);
+        FileConfiguration config;
+        FileConfiguration backpackConfig;
+        FileConfiguration transferConfig;
+        try {
+            config = loadStrictConfiguration(dataFile);
+            backpackConfig = loadStrictConfiguration(backpackFile);
+            transferConfig = loadStrictConfiguration(transferFile);
+        } catch (IOException | InvalidConfigurationException e) {
+            plugin.getLogger().severe("读取NPC存储失败，已禁用保存以保护原始数据: " + e.getMessage());
+            return;
+        }
 
-                // 如果所在区块已加载，则生成实体
-                Location loc = npc.getLocation();
-                if (loc != null && loc.getWorld() != null && loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
-                    spawnNPC(npc);
+        try {
+            Object rawNpcs = config.get("npcs");
+            if (rawNpcs != null && !(rawNpcs instanceof List<?>)) {
+                throw new IllegalArgumentException("npcs 必须为列表");
+            }
+            Map<String, PhilosNPC> loadedNpcs = new LinkedHashMap<>();
+            if (rawNpcs instanceof List<?> npcRows) {
+                for (Object rawRow : npcRows) {
+                    if (!(rawRow instanceof Map<?, ?> rawMap)) {
+                        throw new IllegalArgumentException("npcs 列表中包含非映射项");
+                    }
+                    PhilosNPC npc = PhilosNPC.fromMap((Map<String, Object>) rawMap);
+                    if (npc.getId() == null || npc.getOwnerUuid() == null
+                            || loadedNpcs.putIfAbsent(npc.getId(), npc) != null) {
+                        throw new IllegalArgumentException("NPC ID 缺失或重复: " + npc.getId());
+                    }
                 }
             }
+
+            loadPersistedMigrationReviews(config);
+            npcs.putAll(loadedNpcs);
+            loadCollectionBackpacks(backpackConfig);
+            loadTransferVaults(transferConfig);
+        } catch (RuntimeException e) {
+            npcs.clear();
+            sharedShopInventories.clear();
+            collectionBackpacks.clear();
+            transferVaults.clear();
+            shopInventoryMigrationReviews.clear();
+            plugin.getLogger().severe("NPC存储内容无法完整读取，已禁用保存以保护原始数据: " + e.getMessage());
+            return;
         }
 
-        // 旧版共享库存一次性迁移到按店主+世界隔离格式（需在NPC加载后、共享库存分组前执行）
-        migrateLegacyShopInventories(config);
+        // 无版本的旧库存不能凭“内容相等”推断哪个世界副本可删除；歧义数据保持逐NPC原样。
+        boolean migrationPersisted;
+        try {
+            migrationPersisted = migrateLegacyShopInventories(config);
+        } catch (IOException | RuntimeException e) {
+            migrationPersisted = false;
+            plugin.getLogger().severe("库存迁移状态写入失败，保存已暂停以保护原始文件: " + e.getMessage());
+        }
 
-        // 加载收购背包（NPC数据之后：旧格式迁移需要按该玩家NPC所在世界归并）
-        loadCollectionBackpacks();
-        loadTransferVaults();
-
-        // 初始化共享商店背包（按 玩家|世界 分组：同玩家同世界的NPC共享一份）
         for (PhilosNPC npc : npcs.values()) {
-            UUID ownerUuid = npc.getOwnerUuid();
-            String key = scopeKey(ownerUuid, npc.getWorldName());
+            if (isShopInventoryMigrationBlocked(npc.getOwnerUuid())) continue;
+            String key = scopeKey(npc.getOwnerUuid(), npc.getWorldName());
             if (!sharedShopInventories.containsKey(key)) {
-                // 以该世界内第一个找到的NPC商店背包作为该世界侧共享背包
                 sharedShopInventories.put(key, npc.getShopInventory().clone());
             }
-            // 同步共享背包到该NPC（确保同世界所有NPC数据一致）
             npc.setShopInventory(sharedShopInventories.get(key));
         }
 
-        plugin.getLogger().info("已加载 " + npcs.size() + " 个NPC");
-    }
-
-    public void saveAll() {
-        // 保存前，将共享商店背包同步到所有NPC（按各自所在世界取对应侧）
         for (PhilosNPC npc : npcs.values()) {
-            ItemStack[] sharedInv = sharedShopInventories.get(scopeKey(npc.getOwnerUuid(), npc.getWorldName()));
-            if (sharedInv != null) {
-                npc.setShopInventory(sharedInv.clone());
+            Location loc = npc.getLocation();
+            if (loc != null && loc.getWorld() != null
+                    && loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
+                spawnNPC(npc);
             }
         }
 
+        storageReady = migrationPersisted;
+        plugin.getLogger().info("已加载 " + npcs.size() + " 个NPC");
+        for (Map.Entry<UUID, Set<String>> review : shopInventoryMigrationReviews.entrySet()) {
+            plugin.getLogger().warning("店主 " + review.getKey() + " 的商店库存待人工核账，涉及世界 "
+                    + String.join(", ", review.getValue())
+                    + "；数据未自动合并或清空，交易/编辑/移动/删除已禁用。请停服备份并核对 npcs.yml 和插件日志所列的迁移备份路径");
+        }
+    }
+
+    private FileConfiguration loadStrictConfiguration(File file)
+            throws IOException, InvalidConfigurationException {
+        YamlConfiguration config = new YamlConfiguration();
+        if (file.exists()) config.load(file);
+        return config;
+    }
+
+    public void saveAll() {
+        if (!storageReady) {
+            plugin.getLogger().warning("存储未成功加载或迁移未安全完成，本次跳过保存以保护原始数据");
+            return;
+        }
+
+        // 只同步可安全聚合的owner；待核账owner保留npcs.yml中的逐NPC原始副本。
+        for (PhilosNPC npc : npcs.values()) {
+            if (isShopInventoryMigrationBlocked(npc.getOwnerUuid())) continue;
+            ItemStack[] sharedInv = sharedShopInventories.get(scopeKey(npc.getOwnerUuid(), npc.getWorldName()));
+            if (sharedInv != null) npc.setShopInventory(sharedInv.clone());
+        }
+
         FileConfiguration config = new YamlConfiguration();
-        // 库存格式版本标记：已迁移/新格式存档不再走旧共享库存迁移
         config.set("inventory-format", 2);
         List<Map<String, Object>> npcList = new ArrayList<>();
-        for (PhilosNPC npc : npcs.values()) {
-            npcList.add(npc.toMap());
-        }
+        for (PhilosNPC npc : npcs.values()) npcList.add(npc.toMap());
         config.set("npcs", npcList);
+        config.set("inventory-migration-review", serializeMigrationReviews());
 
         try {
-            config.save(dataFile);
+            InventoryMigrationStorage.writeAtomically(dataFile.toPath(), path -> config.save(path.toFile()));
         } catch (IOException e) {
-            plugin.getLogger().severe("保存NPC数据失败: " + e.getMessage());
+            plugin.getLogger().severe("保存NPC数据失败，原文件保持不变: " + e.getMessage());
         }
 
         saveCollectionBackpacks();
         saveTransferVaults();
     }
 
-    // ===== 旧版共享库存一次性迁移 =====
+    // ===== 旧版共享库存迁移 =====
 
     /**
-     * 旧版按店主共享的商店库存（各世界NPC携带同一份副本）一次性迁移到按店主+世界隔离格式。
-     * 无标记时执行：各世界副本完全一致 → 视为旧版复制产物，仅保留主世界侧一份，其余清空；
-     * 副本不一致 → 可能为升级后各自演化过的数据，原样保留并提示管理员核账，不任意删除。
-     * 迁移前备份 npcs.yml，完成后写入 inventory-format 标记，重复启动不会二次迁移。
+     * Marks every legacy owner whose copies cannot be assigned safely to a world.
+     * The serialized NPC rows remain untouched until an administrator resolves the review.
+     *
+     * @return true only after version and review metadata have been safely persisted
      */
-    private void migrateLegacyShopInventories(FileConfiguration config) {
-        if (config.getInt("inventory-format", 0) >= 2) return;
+    private boolean migrateLegacyShopInventories(FileConfiguration config) throws IOException {
+        Object rawFormat = config.get("inventory-format");
+        if (rawFormat != null && !(rawFormat instanceof Number)) {
+            throw new IllegalArgumentException("inventory-format 必须为数字");
+        }
+        if (config.getInt("inventory-format", 0) >= 2) return true;
 
-        // 收集个人NPC（系统NPC无共享库存）按店主分组
-        Map<UUID, List<PhilosNPC>> personalByOwner = new LinkedHashMap<>();
+        List<ShopInventoryMigration.InventoryRecord<ItemStack[]>> records = new ArrayList<>();
         for (PhilosNPC npc : npcs.values()) {
-            if (!npc.isSystem()) {
-                personalByOwner.computeIfAbsent(npc.getOwnerUuid(), k -> new ArrayList<>()).add(npc);
-            }
+            records.add(new ShopInventoryMigration.InventoryRecord<>(npc.getOwnerUuid(), npc.getWorldName(),
+                    npc.isSystem(), npc.getShopInventory()));
         }
-
-        boolean needsBackup = false;
-        Map<UUID, String> migrateTargets = new LinkedHashMap<>();
-        for (Map.Entry<UUID, List<PhilosNPC>> entry : personalByOwner.entrySet()) {
-            // 每个世界取第一个NPC保存的副本（与共享库存分组初始化口径一致）
-            Map<String, ItemStack[]> firstByWorld = new LinkedHashMap<>();
-            for (PhilosNPC npc : entry.getValue()) {
-                firstByWorld.putIfAbsent(npc.getWorldName(), npc.getShopInventory());
-            }
-            if (firstByWorld.size() < 2) continue; // 单世界店主无复制风险
-
-            ItemStack[] reference = null;
-            boolean consistent = true;
-            for (ItemStack[] inv : firstByWorld.values()) {
-                if (reference == null) {
-                    reference = inv;
-                } else if (!inventoriesIdentical(reference, inv)) {
-                    consistent = false;
-                    break;
-                }
-            }
-
-            if (!consistent) {
-                plugin.getLogger().warning("店主 " + entry.getKey() + " 在多个世界的商店库存内容不一致，"
-                        + "可能是升级后各自演化过的数据，已原样保留，请管理员人工核账，不做自动迁移");
-                continue;
-            }
-            needsBackup = true;
-            migrateTargets.put(entry.getKey(), migrateWorldFor(entry.getKey()));
-        }
-
-        // 备份必须在清空副本之前完成：备份失败时若内存已被清空，后续任意saveAll会把清空结果写盘绕过备份
-        if (needsBackup) {
-            File backup = new File(dataFile.getParentFile(), "npcs.yml.bak-v1-inventory");
-            if (!backup.exists()) {
-                try {
-                    java.nio.file.Files.copy(dataFile.toPath(), backup.toPath());
-                } catch (IOException e) {
-                    plugin.getLogger().severe("迁移前备份 npcs.yml 失败，本次启动跳过迁移（下次启动重试）: " + e.getMessage());
-                    return;
-                }
-            }
-        }
-
-        for (Map.Entry<UUID, String> entry : migrateTargets.entrySet()) {
-            String target = entry.getValue();
-            for (PhilosNPC npc : personalByOwner.get(entry.getKey())) {
-                if (!npc.getWorldName().equals(target)) {
-                    npc.setShopInventory(new ItemStack[36]);
-                }
-            }
-            plugin.getLogger().info("旧版共享商店库存迁移：店主 " + entry.getKey()
-                    + " 的库存保留至世界 " + target + "，其余世界副本清空");
-        }
+        Map<UUID, Set<String>> ambiguous = ShopInventoryMigration.findAmbiguousOwners(
+                records, NPCManager::inventoriesIdentical);
+        ambiguous.forEach((owner, worlds) -> shopInventoryMigrationReviews
+                .computeIfAbsent(owner, ignored -> new TreeSet<>()).addAll(worlds));
 
         config.set("inventory-format", 2);
-        List<Map<String, Object>> npcList = new ArrayList<>();
-        for (PhilosNPC npc : npcs.values()) {
-            npcList.add(npc.toMap());
+        config.set("inventory-migration-review", serializeMigrationReviews());
+        File backup = new File(dataFile.getParentFile(), "npcs.yml.bak-v1-inventory");
+        java.nio.file.Path actualBackup = InventoryMigrationStorage.saveWithBackup(
+                dataFile.toPath(), backup.toPath(), path -> config.save(path.toFile()));
+        plugin.getLogger().info("库存迁移已备份原始NPC存档: " + actualBackup);
+        return true;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadPersistedMigrationReviews(FileConfiguration config) {
+        Object raw = config.get("inventory-migration-review");
+        if (raw == null) return;
+        if (!(raw instanceof List<?> rows)) {
+            throw new IllegalArgumentException("inventory-migration-review 必须为列表");
         }
-        config.set("npcs", npcList);
-        try {
-            config.save(dataFile);
-        } catch (IOException e) {
-            plugin.getLogger().severe("写入库存格式标记失败（迁移结果仅在内存，下次启动将重新迁移）: " + e.getMessage());
+        for (Object row : rows) {
+            if (!(row instanceof Map<?, ?> map)
+                    || !(map.get("ownerUuid") instanceof String ownerText)
+                    || !(map.get("worlds") instanceof List<?> worlds)) {
+                throw new IllegalArgumentException("inventory-migration-review 项格式无效");
+            }
+            UUID owner = UUID.fromString(ownerText);
+            Set<String> names = new TreeSet<>();
+            for (Object world : worlds) {
+                if (!(world instanceof String name) || name.isBlank()) {
+                    throw new IllegalArgumentException("inventory-migration-review 世界名无效: " + ownerText);
+                }
+                names.add(name);
+            }
+            if (names.isEmpty()) throw new IllegalArgumentException("库存待核账世界列表为空: " + ownerText);
+            shopInventoryMigrationReviews.put(owner, names);
         }
     }
 
-    /** 逐格比较两份库存是否完全一致（类型、堆叠数与物品元数据） */
+    private List<Map<String, Object>> serializeMigrationReviews() {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map.Entry<UUID, Set<String>> entry : shopInventoryMigrationReviews.entrySet()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("ownerUuid", entry.getKey().toString());
+            row.put("worlds", new ArrayList<>(new TreeSet<>(entry.getValue())));
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    /**逐格比较库存；长度、类型、数量和物品元数据都必须完全相同。*/
     static boolean inventoriesIdentical(ItemStack[] a, ItemStack[] b) {
         if (a == null || b == null) return a == b;
-        int n = Math.min(a.length, b.length);
-        for (int i = 0; i < n; i++) {
+        if (a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++) {
             ItemStack x = a[i];
             ItemStack y = b[i];
             if (x == null || y == null) {
                 if (x != y) return false;
-                continue;
+            } else if (x.getAmount() != y.getAmount() || !x.isSimilar(y)) {
+                return false;
             }
-            if (x.getAmount() != y.getAmount() || !x.isSimilar(y)) return false;
         }
         return true;
     }
@@ -307,39 +361,43 @@ public class NPCManager {
     }
 
     @SuppressWarnings("unchecked")
-    private void loadCollectionBackpacks() {
-        if (!backpackFile.exists()) return;
-        FileConfiguration config = YamlConfiguration.loadConfiguration(backpackFile);
+    private void loadCollectionBackpacks(FileConfiguration config) {
         var section = config.getConfigurationSection("backpacks");
+        if (config.contains("backpacks") && section == null) {
+            throw new IllegalArgumentException("收购背包数据必须为映射");
+        }
         if (section == null) return;
         for (String key : section.getKeys(false)) {
-            try {
-                if (key.contains("|")) {
-                    // 新格式：UUID|世界名
-                    String[] parts = key.split("\\|", 2);
-                    UUID.fromString(parts[0]);
-                    collectionBackpacks.put(key, deserializeItemList(config, "backpacks." + key));
-                } else {
-                    // 旧格式：纯UUID → 按该玩家NPC所在世界迁移（多世界取主世界）
-                    UUID ownerUuid = UUID.fromString(key);
-                    String world = migrateWorldFor(ownerUuid);
-                    collectionBackpacks.put(scopeKey(ownerUuid, world), deserializeItemList(config, "backpacks." + key));
-                    plugin.getLogger().info("收购背包旧数据迁移: " + key + " → " + world);
+            if (key.contains("|")) {
+                // 新格式：UUID|世界名
+                String[] parts = key.split("\\|", 2);
+                if (parts.length != 2 || parts[1].isBlank()) {
+                    throw new IllegalArgumentException("收购背包范围键无效: " + key);
                 }
-            } catch (IllegalArgumentException ignored) {
-                plugin.getLogger().warning("收购背包数据包含无效的UUID: " + key);
+                UUID.fromString(parts[0]);
+                collectionBackpacks.put(key, deserializeItemList(config, "backpacks." + key));
+            } else {
+                // 旧格式：纯UUID → 按该玩家NPC所在世界迁移（多世界取主世界）
+                UUID ownerUuid = UUID.fromString(key);
+                String world = migrateWorldFor(ownerUuid);
+                collectionBackpacks.put(scopeKey(ownerUuid, world), deserializeItemList(config, "backpacks." + key));
+                plugin.getLogger().info("收购背包旧数据迁移: " + key + " → " + world);
             }
         }
     }
 
+    @SuppressWarnings("unchecked")
     private List<ItemStack> deserializeItemList(FileConfiguration config, String path) {
         List<ItemStack> items = new ArrayList<>();
-        for (Map<?, ?> rawMap : config.getMapList(path)) {
-            try {
-                items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
-            } catch (IllegalArgumentException ignored) {
-                // 单个物品损坏时跳过，不影响整包加载
+        Object rawItems = config.get(path);
+        if (!(rawItems instanceof List<?> list)) {
+            throw new IllegalArgumentException("物品列表格式无效: " + path);
+        }
+        for (Object rawItem : list) {
+            if (!(rawItem instanceof Map<?, ?> rawMap)) {
+                throw new IllegalArgumentException("物品数据格式无效: " + path);
             }
+            items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
         }
         return items;
     }
@@ -358,9 +416,9 @@ public class NPCManager {
             }
         }
         try {
-            config.save(backpackFile);
+            InventoryMigrationStorage.writeAtomically(backpackFile.toPath(), path -> config.save(path.toFile()));
         } catch (IOException e) {
-            plugin.getLogger().severe("保存收购背包失败: " + e.getMessage());
+            plugin.getLogger().severe("保存收购背包失败，原文件保持不变: " + e.getMessage());
         }
     }
 
@@ -425,25 +483,26 @@ public class NPCManager {
     }
 
     @SuppressWarnings("unchecked")
-    private void loadTransferVaults() {
-        if (!transferFile.exists()) return;
-        FileConfiguration config = YamlConfiguration.loadConfiguration(transferFile);
+    private void loadTransferVaults(FileConfiguration config) {
         var section = config.getConfigurationSection("vaults");
+        if (config.contains("vaults") && section == null) {
+            throw new IllegalArgumentException("转移仓库数据必须为映射");
+        }
         if (section == null) return;
         for (String key : section.getKeys(false)) {
-            try {
-                UUID ownerUuid = UUID.fromString(key);
-                List<ItemStack> items = new ArrayList<>();
-                for (Map<?, ?> rawMap : config.getMapList("vaults." + key)) {
-                    try {
-                        items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
-                    } catch (IllegalArgumentException ignored) {
-                    }
-                }
-                transferVaults.put(ownerUuid, items);
-            } catch (IllegalArgumentException ignored) {
-                plugin.getLogger().warning("转移仓库数据包含无效的UUID: " + key);
+            UUID ownerUuid = UUID.fromString(key);
+            List<ItemStack> items = new ArrayList<>();
+            Object rawItems = config.get("vaults." + key);
+            if (!(rawItems instanceof List<?> list)) {
+                throw new IllegalArgumentException("转移仓库物品列表无效: " + key);
             }
+            for (Object rawItem : list) {
+                if (!(rawItem instanceof Map<?, ?> rawMap)) {
+                    throw new IllegalArgumentException("转移仓库物品数据无效: " + key);
+                }
+                items.add(ItemStack.deserialize((Map<String, Object>) rawMap));
+            }
+            transferVaults.put(ownerUuid, items);
         }
     }
 
@@ -461,9 +520,9 @@ public class NPCManager {
             }
         }
         try {
-            config.save(transferFile);
+            InventoryMigrationStorage.writeAtomically(transferFile.toPath(), path -> config.save(path.toFile()));
         } catch (IOException e) {
-            plugin.getLogger().severe("保存转移仓库失败: " + e.getMessage());
+            plugin.getLogger().severe("保存转移仓库失败，原文件保持不变: " + e.getMessage());
         }
     }
 
@@ -530,6 +589,7 @@ public class NPCManager {
     public boolean deleteNPC(String id) {
         PhilosNPC npc = npcs.get(id);
         if (npc == null) return false;
+        if (!npc.isSystem() && isShopInventoryMigrationBlocked(npc.getOwnerUuid())) return false;
 
         // 个人NPC删除退款给主人（金额见 config.yml，0=不退款）
         if (!npc.isSystem() && PhilosNPCPlugin.economy() != null && PluginSettings.deleteRefund() > 0) {
@@ -644,6 +704,7 @@ public class NPCManager {
      * @return 商店背包物品数组（36格）
      */
     public ItemStack[] getSharedShopInventory(UUID ownerUuid, String worldName) {
+        if (!isShopInventoryAvailable(ownerUuid)) return new ItemStack[36];
         String key = scopeKey(ownerUuid, worldName);
         ItemStack[] inv = sharedShopInventories.get(key);
         if (inv == null) {
@@ -660,7 +721,29 @@ public class NPCManager {
      * @param inventory 背包物品数组
      */
     public void setSharedShopInventory(UUID ownerUuid, String worldName, ItemStack[] inventory) {
+        if (!isShopInventoryAvailable(ownerUuid)) return;
         sharedShopInventories.put(scopeKey(ownerUuid, worldName), inventory);
+    }
+
+    /** True when all plugin storage loaded and any legacy migration was safely persisted. */
+    public boolean isStorageReady() {
+        return storageReady;
+    }
+
+    /** True when this owner has legacy stock that requires administrator review. */
+    public boolean isShopInventoryMigrationBlocked(UUID ownerUuid) {
+        return ownerUuid != null && shopInventoryMigrationReviews.containsKey(ownerUuid);
+    }
+
+    /** Shop inventory access is disabled while storage is unavailable or owner stock is ambiguous. */
+    public boolean isShopInventoryAvailable(UUID ownerUuid) {
+        return storageReady && !isShopInventoryMigrationBlocked(ownerUuid);
+    }
+
+    /** The worlds retained for manual review, in stable sorted order. */
+    public Set<String> getShopInventoryMigrationReviewWorlds(UUID ownerUuid) {
+        Set<String> worlds = shopInventoryMigrationReviews.get(ownerUuid);
+        return worlds == null ? Set.of() : Collections.unmodifiableSet(new TreeSet<>(worlds));
     }
 
     // ===== 商店背包编辑锁 =====
@@ -671,6 +754,7 @@ public class NPCManager {
      * @return 锁定成功（或编辑者即本人重入）返回true
      */
     public boolean tryLockShopInventory(UUID ownerUuid, String worldName, UUID editor) {
+        if (!isShopInventoryAvailable(ownerUuid)) return false;
         String key = scopeKey(ownerUuid, worldName);
         UUID current = shopEditLocks.get(key);
         if (current != null && !current.equals(editor)) return false;
@@ -687,7 +771,7 @@ public class NPCManager {
 
     /** 该背包当前是否处于编辑锁定中（编辑期间冻结交易） */
     public boolean isShopInventoryLocked(UUID ownerUuid, String worldName) {
-        return shopEditLocks.containsKey(scopeKey(ownerUuid, worldName));
+        return !isShopInventoryAvailable(ownerUuid) || shopEditLocks.containsKey(scopeKey(ownerUuid, worldName));
     }
 
     /** 清除指定编辑者持有的全部背包锁（退出/换世界/重载时兜底，防止永久锁定） */

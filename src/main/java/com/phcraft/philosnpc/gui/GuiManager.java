@@ -46,6 +46,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public class GuiManager implements Listener {
@@ -165,6 +166,7 @@ public class GuiManager implements Listener {
             openTradeEditGui(player, npc, 0);
             return;
         }
+        if (rejectUnavailableShopInventory(player, npc, "编辑")) return;
         // 商店背包必须与NPC同世界操作（含管理员），防止站在别的世界远程取货绕过跨世界转移白名单
         if (!player.getWorld().getName().equals(npc.getWorldName())) {
             player.sendMessage(PhilosNPCPlugin.cc("&c你不在该NPC所在世界（&f" + npc.getWorldName() + "&c），无法操作商店背包"));
@@ -184,6 +186,7 @@ public class GuiManager implements Listener {
     }
 
     public void openTradeEditGui(Player player, PhilosNPC npc, int page) {
+        if (rejectUnavailableShopInventory(player, npc, "编辑商品")) return;
         GuiState state = new GuiState(GuiState.Screen.SHOP_EDIT, npc.getId(), page, new HashMap<>());
         Inventory inv = ShopGui.tradeEditGui(npc, page, state);
         state.setInventory(inv);
@@ -448,6 +451,7 @@ public class GuiManager implements Listener {
      * 打开真正的村民交易界面
      */
     public void openMerchantShop(Player player, PhilosNPC npc) {
+        if (rejectUnavailableShopInventory(player, npc, "交易")) return;
         List<ShopTrade> allTrades = npc.getTrades();
         if (allTrades.isEmpty()) {
             player.sendMessage(PhilosNPCPlugin.cc("&c该商店暂无商品"));
@@ -681,6 +685,8 @@ public class GuiManager implements Listener {
                 int selected = mi.getSelectedRecipeIndex();
                 if (selected < 0 || selected >= session.trades.size()) return;
                 ShopTrade trade = session.trades.get(selected);
+
+                if (rejectUnavailableShopInventory(player, session.npc, "交易")) return;
 
                 // 个人NPC：顾客必须仍在开店世界（跨世界传送理论上会关闭界面，此处兜底防绕过隔离）
                 if (!session.npc.isSystem() && !player.getWorld().getName().equals(session.worldName)) {
@@ -941,6 +947,22 @@ public class GuiManager implements Listener {
         }
     }
 
+    private boolean rejectUnavailableShopInventory(Player player, PhilosNPC npc, String action) {
+        if (npc.isSystem()) return false;
+        if (npcManager.isShopInventoryMigrationBlocked(npc.getOwnerUuid())) {
+            Set<String> worlds = npcManager.getShopInventoryMigrationReviewWorlds(npc.getOwnerUuid());
+            player.sendMessage(PhilosNPCPlugin.cc("&c该店主在世界 &f" + String.join(", ", worlds)
+                    + " &c的库存待管理员核账，已暂停" + action
+                    + "。请管理员停服后备份插件数据目录，并按库存恢复文档核对各世界库存"));
+            return true;
+        }
+        if (!npcManager.isStorageReady()) {
+            player.sendMessage(PhilosNPCPlugin.cc("&cNPC存储暂不可用，已暂停" + action + "以保护物品"));
+            return true;
+        }
+        return false;
+    }
+
     /**
      * 检查顶部容器指定槽位是否允许物品交互（放入/取出）
      * @param slot 原始槽位号
@@ -1195,12 +1217,14 @@ public class GuiManager implements Listener {
                 openSizeAdjustGui(player, npc);
                 break;
             case 21: // 移动NPC
+                if (rejectUnavailableShopInventory(player, npc, "移动")) break;
                 player.closeInventory();
                 player.sendMessage(PhilosNPCPlugin.cc("&a走到目标位置，然后输入："));
                 player.sendMessage(PhilosNPCPlugin.cc("&e/pnpc move " + npc.getId()));
                 player.sendMessage(PhilosNPCPlugin.cc("&7点击上方命令可直接复制"));
                 break;
             case 22: // 删除NPC
+                if (rejectUnavailableShopInventory(player, npc, "删除")) break;
                 player.closeInventory();
                 if (npcManager.deleteNPC(npc.getId())) {
                     player.sendMessage(PhilosNPCPlugin.cc("&cNPC已删除"));

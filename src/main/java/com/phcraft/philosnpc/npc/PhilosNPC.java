@@ -46,6 +46,7 @@ public class PhilosNPC {
 
     // 传送相关
     private Location teleportTarget;
+    private String teleportTargetWorldName;
 
     // 留言相关
     private String message;
@@ -136,7 +137,11 @@ public class PhilosNPC {
     }
 
     public Location getTeleportTarget() { return teleportTarget; }
-    public void setTeleportTarget(Location teleportTarget) { this.teleportTarget = teleportTarget; }
+    public void setTeleportTarget(Location teleportTarget) {
+        this.teleportTarget = teleportTarget;
+        this.teleportTargetWorldName = teleportTarget == null || teleportTarget.getWorld() == null
+                ? null : teleportTarget.getWorld().getName();
+    }
 
     public String getMessage() { return message; }
     public void setMessage(String message) { this.message = message; }
@@ -196,7 +201,8 @@ public class PhilosNPC {
         map.put("id", id);
         map.put("ownerName", ownerName);
         map.put("ownerUuid", ownerUuid.toString());
-        map.put("location", serializeLocation(location));
+        // The configured world may not be loaded, but its saved name still owns this NPC and stock.
+        map.put("location", serializeLocation(location, worldName));
         map.put("pose", pose.name());
         map.put("scale", scale);
 
@@ -239,7 +245,7 @@ public class PhilosNPC {
 
         // teleportTarget
         if (teleportTarget != null) {
-            map.put("teleportTarget", serializeLocation(teleportTarget));
+            map.put("teleportTarget", serializeLocation(teleportTarget, teleportTargetWorldName));
         }
 
         map.put("message", message);
@@ -329,7 +335,11 @@ public class PhilosNPC {
 
         // teleportTarget
         if (map.containsKey("teleportTarget")) {
-            npc.teleportTarget = deserializeLocation((Map<String, Object>) map.get("teleportTarget"));
+            Map<String, Object> targetMap = (Map<String, Object>) map.get("teleportTarget");
+            npc.teleportTarget = deserializeLocation(targetMap);
+            if (targetMap != null && targetMap.get("world") instanceof String targetWorld) {
+                npc.teleportTargetWorldName = targetWorld;
+            }
         }
 
         npc.message = (String) map.getOrDefault("message", "");
@@ -352,10 +362,14 @@ public class PhilosNPC {
 
     // ===== Location 序列化辅助 =====
 
-    private static Map<String, Object> serializeLocation(Location loc) {
+    private static Map<String, Object> serializeLocation(Location loc, String fallbackWorldName) {
         if (loc == null) return null;
+        String world = loc.getWorld() == null ? fallbackWorldName : loc.getWorld().getName();
+        if (world == null || world.isBlank()) {
+            throw new IllegalStateException("无法保存世界未加载且没有已保存世界名的NPC位置");
+        }
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("world", loc.getWorld().getName());
+        map.put("world", world);
         map.put("x", loc.getX());
         map.put("y", loc.getY());
         map.put("z", loc.getZ());
