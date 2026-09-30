@@ -1464,6 +1464,9 @@ public class GuiManager implements Listener {
                 player.closeInventory();
                 if (npcManager.deleteNPC(npc.getId())) {
                     player.sendMessage(PhilosNPCPlugin.cc("&cNPC已删除"));
+                } else if (!npc.getOwnerUuid().equals(player.getUniqueId())) {
+                    player.sendMessage(PhilosNPCPlugin.cc(
+                            "&cNPC未删除：原世界最后一个个人NPC仍有商店库存，请先取回或移出全部库存"));
                 }
                 break;
             case 23: // 装备编辑

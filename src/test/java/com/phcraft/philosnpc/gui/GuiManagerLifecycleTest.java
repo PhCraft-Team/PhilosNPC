@@ -46,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.doAnswer;
@@ -302,6 +303,33 @@ class GuiManagerLifecycleTest {
         verify(top, never()).setItem(eq(0), any());
         verify(npcManager, never()).setSharedShopInventory(eq(ownerId), eq("world-a"), any());
         verify(player).closeInventory();
+    }
+
+    @Test
+    void adminIsNotifiedWhenGuiCannotDeleteNpcWithRemainingShopInventory() {
+        Player admin = playerIn("world");
+        PhilosNPC npc = personalNpc("npc-a", "world");
+        when(admin.hasPermission("philosnpc.admin")).thenReturn(true);
+        when(npcManager.getNPC("npc-a")).thenReturn(npc);
+        when(npcManager.deleteNPC("npc-a")).thenReturn(false);
+
+        GuiManager.GuiState state = new GuiManager.GuiState(
+                GuiManager.GuiState.Screen.MAIN, "npc-a", 0, new HashMap<>());
+        Inventory top = inventory(54);
+        when(top.getHolder()).thenReturn(state);
+        InventoryView view = view(top);
+        InventoryClickEvent click = mock(InventoryClickEvent.class);
+        when(click.getWhoClicked()).thenReturn(admin);
+        when(click.getView()).thenReturn(view);
+        when(click.getRawSlot()).thenReturn(22);
+        when(click.getClick()).thenReturn(ClickType.LEFT);
+
+        gui.onInventoryClick(click);
+
+        verify(npcManager).deleteNPC("npc-a");
+        verify(admin).sendMessage(argThat((String message) ->
+                message.contains("NPC未删除") && message.contains("商店库存")));
+        verify(admin, never()).sendMessage(PhilosNPCPlugin.cc("&cNPC已删除"));
     }
 
     @Test
