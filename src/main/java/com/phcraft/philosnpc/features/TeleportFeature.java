@@ -91,6 +91,11 @@ public class TeleportFeature {
         }
         boolean teleported;
         try {
+            // 传送前结束本插件会话；保留其他插件当前打开的容器。
+            PhilosNPCPlugin plugin = PhilosNPCPlugin.instance();
+            if (plugin != null && plugin.guiManager() != null) {
+                plugin.guiManager().closeNpcSession(player);
+            }
             teleported = player.teleport(target);
         } catch (RuntimeException ex) {
             teleported = false;

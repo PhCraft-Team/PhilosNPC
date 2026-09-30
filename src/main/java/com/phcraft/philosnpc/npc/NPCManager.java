@@ -2,6 +2,7 @@ package com.phcraft.philosnpc.npc;
 
 import com.phcraft.philosnpc.PhilosNPCPlugin;
 import com.phcraft.philosnpc.PluginSettings;
+import com.phcraft.philosnpc.gui.GuiManager;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
@@ -591,6 +592,19 @@ public class NPCManager {
         if (npc == null) return false;
         if (!npc.isSystem() && isShopInventoryMigrationBlocked(npc.getOwnerUuid())) return false;
 
+        GuiManager gui = plugin.guiManager();
+        if (gui != null) {
+            gui.closeSessionsForNpc(id);
+        }
+        if (wouldLoseShopInventoryOnRemoval(npc)) {
+            Player owner = Bukkit.getPlayer(npc.getOwnerUuid());
+            if (owner != null) {
+                owner.sendMessage(PhilosNPCPlugin.cc(
+                        "&c无法删除：这是你在该世界最后一个个人NPC，商店背包仍有物品。请先取回或移出全部库存后重试"));
+            }
+            return false;
+        }
+
         // 个人NPC删除退款给主人（金额见 config.yml，0=不退款）
         if (!npc.isSystem() && PhilosNPCPlugin.economy() != null && PluginSettings.deleteRefund() > 0) {
             PhilosNPCPlugin.economy().depositPlayer(
@@ -605,6 +619,33 @@ public class NPCManager {
         npcs.remove(id);
         saveAll();
         return true;
+    }
+
+    /**
+     * 是否因移除该NPC而让非空的店主/世界库存失去存档载体。
+     * 同一scope仍有其他个人NPC时，saveAll会继续把共享库存保存到其NPC数据中。
+     */
+    public boolean wouldLoseShopInventoryOnRemoval(PhilosNPC candidate) {
+        if (candidate == null || candidate.isSystem()) return false;
+        ItemStack[] inventory = getSharedShopInventory(candidate.getOwnerUuid(), candidate.getWorldName());
+        return wouldLoseShopInventoryOnRemoval(candidate, npcs.values(), inventory);
+    }
+
+    static boolean wouldLoseShopInventoryOnRemoval(
+            PhilosNPC candidate, Collection<PhilosNPC> allNpcs, ItemStack[] inventory) {
+        if (candidate == null || candidate.isSystem()) return false;
+        for (PhilosNPC other : allNpcs) {
+            if (other == null || other.isSystem() || other.getId().equals(candidate.getId())) continue;
+            if (candidate.getOwnerUuid().equals(other.getOwnerUuid())
+                    && candidate.getWorldName().equals(other.getWorldName())) {
+                return false;
+            }
+        }
+        if (inventory == null) return false;
+        for (ItemStack item : inventory) {
+            if (item != null && !item.getType().isAir()) return true;
+        }
+        return false;
     }
 
     // ===== 查询 =====
