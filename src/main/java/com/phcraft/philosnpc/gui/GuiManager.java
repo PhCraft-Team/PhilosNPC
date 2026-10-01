@@ -62,8 +62,8 @@ public class GuiManager implements Listener {
     // 防止Vault回调重入，在成交完成前打开同一世界侧背包编辑界面
     private final Set<String> shopTransactionsInProgress = new HashSet<>();
 
-    // 上次付款结果未知的玩家：暂停其后续商店消费，待管理员核对经济账本后清理
-    private final java.util.Set<UUID> uncertainPayments = new java.util.HashSet<>();
+    private static final NamespacedKey UNRESOLVED_SHOP_PAYMENT =
+            new NamespacedKey("philosnpc", "unresolved_shop_payment");
 
     // 装备编辑界面的可交互槽位
     private static final int[] EQUIPMENT_SLOTS = {10, 19, 28, 37, 24}; // 头盔, 胸甲, 护腿, 靴子, 主手
@@ -825,8 +825,8 @@ public class GuiManager implements Listener {
                     player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
                     return;
                 }
-                if (uncertainPayments.contains(player.getUniqueId())) {
-                    player.sendMessage(PhilosNPCPlugin.cc("&c上次付款结果未知，请联系管理员核对；当前会话已暂停购买"));
+                if (hasUnresolvedShopPayment(player)) {
+                    player.sendMessage(PhilosNPCPlugin.cc("&c上次付款结果未知，商店购买已暂停；请联系管理员核对账本并解除锁定"));
                     player.playSound(player.getLocation(), Sound.ENTITY_VILLAGER_NO, 1f, 1f);
                     return;
                 }
@@ -1120,7 +1120,7 @@ public class GuiManager implements Listener {
                         isSystem ? null : Bukkit.getOfflinePlayer(ownerUuid), price);
                 if (payment != Payments.Result.SUCCESS) {
                     if (payment == Payments.Result.UNCERTAIN) {
-                        uncertainPayments.add(player.getUniqueId());
+                        blockUncertainShopPayment(player, price);
                         plugin.getLogger().severe("商店付款结果未知，禁止重试：buyer=" + player.getUniqueId()
                                 + ", owner=" + ownerUuid + ", price=" + price + ", npc=" + session.npc.getId());
                     }
@@ -1390,7 +1390,6 @@ public class GuiManager implements Listener {
     /** 插件停用时先冲刷所有会话，再清理停用期内存状态。 */
     public void shutdown() {
         closeAllNpcSessions();
-        uncertainPayments.clear();
         shopTransactionsInProgress.clear();
     }
 
@@ -1429,9 +1428,22 @@ public class GuiManager implements Listener {
         }
     }
 
-    /** 管理员核对账本后解除玩家的商店消费暂停 */
-    public void clearUncertainPayment(UUID playerId) {
-        uncertainPayments.remove(playerId);
+    /** 玩家 PDC 会随玩家数据保存，重连或插件重启后仍阻止不确定付款被重复尝试。 */
+    public static boolean hasUnresolvedShopPayment(Player player) {
+        return player != null && player.getPersistentDataContainer().has(UNRESOLVED_SHOP_PAYMENT);
+    }
+
+    private static void blockUncertainShopPayment(Player player, double price) {
+        player.getPersistentDataContainer().set(UNRESOLVED_SHOP_PAYMENT, PersistentDataType.DOUBLE, price);
+        player.saveData();
+    }
+
+    /** 仅在管理员已核对经济账本后调用；此操作不扣款也不退款。 */
+    public static boolean reconcileShopPayment(Player player) {
+        if (!hasUnresolvedShopPayment(player)) return false;
+        player.getPersistentDataContainer().remove(UNRESOLVED_SHOP_PAYMENT);
+        player.saveData();
+        return true;
     }
 
     /** 聊天编辑的目标 NPC 是否仍归该玩家编辑（管理员或店主本人） */

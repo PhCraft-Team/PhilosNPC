@@ -1,7 +1,9 @@
 # PhilosNPC
 
-![Java](https://img.shields.io/badge/Java-21-orange)
-![Paper](https://img.shields.io/badge/Paper-1.21+-green)
+> Paper 26.3 预研：候选构建面向 `26.3.build.19-alpha`，需要 Java 25。此分支不发布正式 Release，只供隔离测试；兼容范围和验证限制见 [PAPER_26_3.md](PAPER_26_3.md)。
+
+![Java](https://img.shields.io/badge/Java-25-orange)
+![Paper](https://img.shields.io/badge/Paper-26.3--alpha-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 功能NPC插件 - 在游戏内创建可交互的玩家NPC和系统NPC，支持商店、传送、留言、礼包、跨世界转移等功能。
@@ -34,12 +36,12 @@
 
 ## 安装
 
-1. 下载 `PhilosNPC-1.4.0.jar`
-2. 放入服务器 `plugins/` 目录
-3. 重启服务器
-4. 安装 Vault 经济插件（必需）
+1. 从 GitHub Actions 的本次运行中下载并解压临时构建产物 `PhilosNPC-1.4.3.jar`
+2. 仅放入隔离测试服的 `plugins/` 目录
+3. 安装 Vault 和可用的 Vault Economy 服务
+4. 重启测试服并检查启动日志
 
-> 需要 **Java 21** 及以上运行环境，支持 Paper 1.21 及以上版本
+> 需要 **Java 25** 和 Paper `26.3.build.19-alpha`。本候选包不兼容 Paper 旧版、Spigot 或 Folia，也不是正式 Release。
 
 ## 命令
 
@@ -53,6 +55,8 @@
 | `/pnpc delete <id>` | 删除NPC | `philosnpc.create` |
 | `/pnpc tp <id>` | 传送到NPC（10金币） | `philosnpc.create` |
 | `/pnpc reload` | 重载配置 | `philosnpc.admin` |
+| `/pnpc reconcileshop <UUID>` | 核对商店账本后解除商店付款锁（玩家需在线） | `philosnpc.admin` |
+| `/pnpc reconcileteleport <UUID>` | 核对传送账本后解除传送付款锁（玩家需在线） | `philosnpc.admin` |
 
 ### 系统NPC类型示例
 ```

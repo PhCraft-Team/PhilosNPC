@@ -10,7 +10,7 @@ depend:
 commands:
   philosnpc:
     description: PhilosNPC 主命令
-    usage: /philosnpc <create|syscreate|list|edit|move|delete|tp|reload>
+    usage: /philosnpc <create|syscreate|list|edit|move|delete|tp|reload|reconcileteleport|reconcileshop|help>
     aliases:
       - pnpc
 

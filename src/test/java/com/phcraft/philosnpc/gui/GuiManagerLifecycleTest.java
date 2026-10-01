@@ -14,6 +14,8 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.Registry;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -41,6 +43,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.logging.Logger;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -78,7 +81,7 @@ class GuiManagerLifecycleTest {
         registryAccessStatic = mockStatic(RegistryAccess.class);
         registryAccessStatic.when(RegistryAccess::registryAccess).thenReturn(registryAccess);
         Registry sounds = Registry.SOUNDS;
-        doReturn(null).when(sounds).getOrThrow(any(NamespacedKey.class));
+        doReturn(null).when(sounds).getOrThrow(any(net.kyori.adventure.key.Key.class));
 
         npcManager = mock(NPCManager.class);
         when(npcManager.isStorageReady()).thenReturn(true);
@@ -447,6 +450,18 @@ class GuiManagerLifecycleTest {
         verify(npcManager, never()).setSharedShopInventory(eq(ownerId), eq("world"), any());
         verify(player, never()).getInventory();
         assertTrue(trade.canUse());
+        verify(player).saveData();
+
+        Player reconnected = playerIn("world");
+        PersistentDataContainer savedPdc = player.getPersistentDataContainer();
+        when(reconnected.getPersistentDataContainer()).thenReturn(savedPdc);
+        NamespacedKey teleportLock = new NamespacedKey("philosnpc", "unresolved_teleport_payment");
+        savedPdc.set(teleportLock, PersistentDataType.DOUBLE, 5.0);
+        assertTrue(GuiManager.hasUnresolvedShopPayment(reconnected));
+        assertTrue(GuiManager.reconcileShopPayment(reconnected));
+        assertFalse(GuiManager.hasUnresolvedShopPayment(player));
+        assertTrue(player.getPersistentDataContainer().has(teleportLock));
+        verify(reconnected).saveData();
 
         Inventory editor = inventory(45);
         InventoryView editorView = view(editor);
@@ -467,6 +482,19 @@ class GuiManagerLifecycleTest {
         when(world.getName()).thenReturn(worldName);
         when(player.getWorld()).thenReturn(world);
         when(player.getUniqueId()).thenReturn(editorId);
+        PersistentDataContainer pdc = mock(PersistentDataContainer.class);
+        Map<NamespacedKey, Double> savedValues = new HashMap<>();
+        when(pdc.has(any(NamespacedKey.class)))
+                .thenAnswer(invocation -> savedValues.containsKey(invocation.getArgument(0)));
+        doAnswer(invocation -> {
+            savedValues.put(invocation.getArgument(0), invocation.getArgument(2));
+            return null;
+        }).when(pdc).set(any(NamespacedKey.class), eq(PersistentDataType.DOUBLE), anyDouble());
+        doAnswer(invocation -> {
+            savedValues.remove(invocation.getArgument(0));
+            return null;
+        }).when(pdc).remove(any(NamespacedKey.class));
+        when(player.getPersistentDataContainer()).thenReturn(pdc);
         return player;
     }
 
